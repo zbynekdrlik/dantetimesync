@@ -346,8 +346,13 @@ mod tests {
         fu_pkt_base[32] = 2; 
         fu_pkt_base[22] = 0xAA; 
         
-        // Use current time to avoid pending_syncs retention policy dropping packets
-        let start_t2 = SystemTime::now();
+        // Use current time stripped of nanoseconds to ensure t2 has 0 nanos relative to second boundary
+        // This avoids large phase offsets due to random current nanoseconds.
+        let now = SystemTime::now();
+        let now_dur = now.duration_since(SystemTime::UNIX_EPOCH).unwrap();
+        let start_t2 = SystemTime::UNIX_EPOCH + Duration::from_secs(now_dur.as_secs());
+        // Also derive start_secs for t1
+        let start_secs = now_dur.as_secs() as u32;
         
         let mut seq = Sequence::new();
         
@@ -365,10 +370,11 @@ mod tests {
             f_pkt[42] = (seq_id >> 8) as u8;
             f_pkt[43] = (seq_id & 0xFF) as u8;
             
-            let t1_sec = 1000 + i as u32;
+            let t1_sec = start_secs + i as u32;
             let mut w = std::io::Cursor::new(&mut f_pkt[47..51]);
             w.write_u32::<BigEndian>(t1_sec).unwrap();
             
+            // offset_ns is small (100ns), well within +/- 1ms limit
             let offset_ns = if i == 4 { 0 } else { 100 };
             let t2 = start_t2 + Duration::from_secs(i as u64) + Duration::from_nanos(offset_ns);
 
