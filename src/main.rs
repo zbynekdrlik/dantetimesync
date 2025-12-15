@@ -365,7 +365,7 @@ fn run_sync_loop(args: Args, running: Arc<AtomicBool>) -> Result<()> {
                         format!("v{} | Settling...", env!("CARGO_PKG_VERSION"))
                     };
                     let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Status(&status_str)]);
-                }
+                };
             }
             
             last_log = Instant::now();
