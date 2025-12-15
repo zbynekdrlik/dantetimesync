@@ -59,26 +59,10 @@ impl WindowsClock {
 
             AdjustTokenPrivileges(token, BOOL(0), Some(&tp), 0, None, None)?;
             
-            // Compiler indicates GetLastError returns Result in this context (likely due to unsafe or windows crate version).
-            // We handle it as Result.
-            // If checking strict types: let err_res = GetLastError();
-            // But if GetLastError returns WIN32_ERROR (struct), we access it directly.
-            // The previous error "expected Result, found WIN32_ERROR" means comparison was against struct, but LHS was Result.
-            
-            // Attempt to unwrap if it is a Result, or use directly if it is a struct.
-            // Since Rust is strict, we can't do both.
-            // Given the error, I assume it returns Result<WIN32_ERROR>.
-            
-            // However, windows 0.52 docs say it returns WIN32_ERROR.
-            // The error might be misleading or I am misinterpreting.
-            // I will use `let err = GetLastError();` and then `if err.0 == ...`.
-            // But previous error said "no field 0 on Result".
-            // So it IS a Result.
-            
-            if let Ok(err) = GetLastError() {
-                if err == ERROR_NOT_ALL_ASSIGNED {
-                     return Err(anyhow!("Failed to adjust privilege: ERROR_NOT_ALL_ASSIGNED"));
-                }
+            // Explicit type to force compiler to tell us if GetLastError returns Result
+            let err: WIN32_ERROR = GetLastError();
+            if err == ERROR_NOT_ALL_ASSIGNED {
+                 return Err(anyhow!("Failed to adjust privilege: ERROR_NOT_ALL_ASSIGNED"));
             }
             
             CloseHandle(token)?;
