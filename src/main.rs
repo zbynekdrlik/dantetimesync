@@ -299,7 +299,7 @@ fn run_sync_loop(args: Args, running: Arc<AtomicBool>) -> Result<()> {
     // Notify systemd (Linux) that we are starting
     #[cfg(unix)]
     {
-        let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Status(format!("v{} | Starting...", env!("CARGO_PKG_VERSION")))]);
+        let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Status(format!("v{} | Starting...", env!("CARGO_PKG_VERSION")).as_str())]);
     }
 
     stop_conflicting_services();
@@ -344,7 +344,7 @@ fn run_sync_loop(args: Args, running: Arc<AtomicBool>) -> Result<()> {
     {
         let _ = sd_notify::notify(false, &[
             sd_notify::NotifyState::Ready, 
-            sd_notify::NotifyState::Status(format!("v{} | PTP Loop Running", env!("CARGO_PKG_VERSION")))
+            sd_notify::NotifyState::Status(format!("v{} | PTP Loop Running", env!("CARGO_PKG_VERSION")).as_str())
         ]);
     }
 
@@ -364,7 +364,7 @@ fn run_sync_loop(args: Args, running: Arc<AtomicBool>) -> Result<()> {
                     } else {
                         format!("v{} | Settling...", env!("CARGO_PKG_VERSION"))
                     };
-                    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Status(status_str)]);
+                    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Status(&status_str)]);
                 }
             }
             
