@@ -7,8 +7,9 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 use std::process::Command;
 use std::fs::File;
-use std::os::unix::io::AsRawFd;
 
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
 #[cfg(unix)]
 use std::os::fd::RawFd;
 #[cfg(unix)]
@@ -17,6 +18,11 @@ use nix::sys::socket::{recvmsg, MsgFlags, ControlMessageOwned, SockaddrStorage};
 use nix::sys::time::TimeSpec;
 #[cfg(unix)]
 use nix::fcntl::{flock, FlockArg};
+
+#[cfg(windows)]
+use windows::Win32::System::Threading::{SetPriorityClass, GetCurrentProcess, REALTIME_PRIORITY_CLASS, HIGH_PRIORITY_CLASS};
+#[cfg(windows)]
+use windows::Win32::Media::timeBeginPeriod;
 
 mod ptp;
 mod net;
@@ -90,6 +96,8 @@ impl RealPtpNetwork {
 
     #[cfg(not(unix))]
     fn recv_with_timestamp(sock: &std::net::UdpSocket, buf: &mut [u8]) -> Result<Option<(usize, SystemTime)>> {
+        // Windows Fallback: User-space timestamping.
+        // Precision is limited by scheduler jitter, but mitigated by Realtime Priority and timeBeginPeriod(1).
         match sock.recv_from(buf) {
             Ok((size, _)) => Ok(Some((size, SystemTime::now()))),
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => Ok(None),
@@ -135,8 +143,11 @@ fn stop_conflicting_services() {
                 if out.status.success() {
                     info!("W32Time stopped successfully.");
                 } else {
+                    // Ignore if already stopped (code 2)
                     let err = String::from_utf8_lossy(&out.stderr);
-                    warn!("Failed to stop W32Time (ignoring if already stopped): {}", err);
+                    if !err.contains("The service has not been started") {
+                         warn!("Failed to stop W32Time: {}", err);
+                    }
                 }
             }
             Err(e) => warn!("Failed to execute 'net stop w32time': {}", e),
@@ -153,13 +164,54 @@ fn stop_conflicting_services() {
     }
 }
 
+fn enable_realtime_priority() {
+    #[cfg(unix)]
+    {
+        unsafe {
+            let policy = libc::SCHED_FIFO;
+            let param = libc::sched_param { sched_priority: 50 };
+            
+            if libc::sched_setscheduler(0, policy, &param) == 0 {
+                info!("Realtime priority (SCHED_FIFO, 50) enabled successfully.");
+            } else {
+                let err = std::io::Error::last_os_error();
+                warn!("Failed to set realtime priority: {}. Latency might suffer.", err);
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        unsafe {
+            // Set REALTIME_PRIORITY_CLASS (Highest possible)
+            // If this is too dangerous (hangs UI), HIGH_PRIORITY_CLASS is fallback.
+            // But for SOTA sync, Realtime is preferred.
+            if SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS).as_bool() {
+                info!("Windows Realtime Priority enabled.");
+            } else {
+                warn!("Failed to set Windows Realtime Priority. Trying High...");
+                if SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS).as_bool() {
+                    info!("Windows High Priority enabled.");
+                } else {
+                    warn!("Failed to set Windows priority.");
+                }
+            }
+            
+            // Force 1ms Timer Resolution
+            if timeBeginPeriod(1) == 0 { // TIMERR_NOERROR = 0
+                info!("Windows High-Res Timer (1ms) enabled.");
+            } else {
+                warn!("Failed to set Windows High-Res Timer.");
+            }
+        }
+    }
+}
+
 fn acquire_singleton_lock() -> Result<File> {
     #[cfg(unix)]
     {
         let lock_path = "/var/run/dantetimesync.lock";
         let file = File::create(lock_path).map_err(|e| anyhow!("Failed to create lock file {}: {}", lock_path, e))?;
         
-        // Try to acquire exclusive non-blocking lock
         match flock(file.as_raw_fd(), FlockArg::LockExclusiveNonblock) {
             Ok(_) => Ok(file),
             Err(nix::errno::Errno::EAGAIN) | Err(nix::errno::Errno::EWOULDBLOCK) => {
@@ -170,12 +222,16 @@ fn acquire_singleton_lock() -> Result<File> {
     }
     #[cfg(not(unix))]
     {
-        Ok(File::create("dantetimesync.lock")?)
+        // Simple file check for Windows (flock not available in std)
+        // A robust Windows mutex would use NamedMutex, but File locking is harder to make non-blocking/exclusive cross-process without winapi.
+        // For now, we rely on the Service Manager (SCM) single instance behavior.
+        // Or create a dummy file and keep it open (Windows file sharing rules default to exclusive write).
+        let file = File::create("dantetimesync.lock")?;
+        Ok(file)
     }
 }
 
 fn main() -> Result<()> {
-    // Customize logger to remove timestamp (journald provides it) and reduce verbosity
     env_logger::builder()
         .format_timestamp(None)
         .filter_level(log::LevelFilter::Info)
@@ -183,7 +239,6 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    // 0. Singleton Check
     let _lock_file = match acquire_singleton_lock() {
         Ok(f) => f,
         Err(e) => {
@@ -200,10 +255,11 @@ fn main() -> Result<()> {
         r.store(false, Ordering::SeqCst);
     })?;
 
-    // 1. Stop Conflicting Services
     stop_conflicting_services();
+    
+    // Enable Priority/Timers BEFORE clock/net init
+    enable_realtime_priority();
 
-    // 2. Initialize Clock
     let sys_clock = match clock::PlatformClock::new() {
         Ok(c) => c,
         Err(e) => {
@@ -214,11 +270,9 @@ fn main() -> Result<()> {
     };
     info!("System clock control initialized.");
 
-    // 3. Network Interface
     let (iface, iface_ip) = net::get_default_interface()?;
     info!("Selected Interface: {} ({})", iface.name, iface_ip);
     
-    // 4. Sockets
     let sock_event = net::create_multicast_socket(ptp::PTP_EVENT_PORT, iface_ip)?;
     let sock_general = net::create_multicast_socket(ptp::PTP_GENERAL_PORT, iface_ip)?;
     info!("Listening on 224.0.1.129 ports 319 (Event) and 320 (General)");
@@ -234,10 +288,8 @@ fn main() -> Result<()> {
 
     let mut controller = PtpController::new(sys_clock, network, ntp_source);
 
-    // 5. NTP Sync
     controller.run_ntp_sync(args.skip_ntp);
 
-    // 6. Main Loop
     info!("Starting PTP Loop...");
     let mut last_log = Instant::now();
     
