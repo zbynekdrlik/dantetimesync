@@ -30,17 +30,35 @@ use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 #[cfg(windows)]
 use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
 #[cfg(windows)]
-use windows::Win32::System::Pipes::{CreateNamedPipeW, PIPE_ACCESS_OUTBOUND, PIPE_TYPE_MESSAGE, PIPE_READMODE_MESSAGE, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES};
-#[cfg(windows)]
-use windows::Win32::Storage::FileSystem::FILE_FLAG_OVERLAPPED;
+use windows::Win32::System::Pipes::{CreateNamedPipeW}; // Removed constants
 #[cfg(windows)]
 use windows::core::PCWSTR;
 #[cfg(windows)]
-use windows::Win32::System::Memory::LocalFree;
+use windows::Win32::Foundation::{INVALID_HANDLE_VALUE, HANDLE, HLOCAL};
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::NamedPipeServer;
 #[cfg(windows)]
 use std::os::windows::io::FromRawHandle;
+
+// Constants for Pipe (Manual definition to avoid import issues)
+#[cfg(windows)]
+const PIPE_ACCESS_OUTBOUND: u32 = 0x00000002;
+#[cfg(windows)]
+const FILE_FLAG_OVERLAPPED: u32 = 0x40000000;
+#[cfg(windows)]
+const PIPE_TYPE_MESSAGE: u32 = 0x00000004;
+#[cfg(windows)]
+const PIPE_READMODE_MESSAGE: u32 = 0x00000002;
+#[cfg(windows)]
+const PIPE_WAIT: u32 = 0x00000000;
+#[cfg(windows)]
+const PIPE_UNLIMITED_INSTANCES: u32 = 255;
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn LocalFree(hMem: HLOCAL) -> HLOCAL;
+}
 
 // Service Imports
 #[cfg(windows)]
@@ -296,7 +314,7 @@ fn start_ipc_server(status: Arc<RwLock<SyncStatus>>) {
                         SDDL_REVISION_1, 
                         &mut sd, 
                         None
-                    ).as_bool() {
+                    ).is_ok() {
                         sa.lpSecurityDescriptor = sd.0;
                         
                         let h = CreateNamedPipeW(
@@ -454,7 +472,7 @@ const SERVICE_NAME: &str = "dantetimesync";
 const SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
 
 #[cfg(windows)]
-fn run_service_logic(args: Args) -> Result<()> {
+fn run_service_logic(_args: Args) -> Result<()> {
     define_windows_service!(ffi_service_main, my_service_main);
 
     fn my_service_main(_arguments: Vec<OsString>) {
