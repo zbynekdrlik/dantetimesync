@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use log::{info, warn, error};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -6,13 +6,17 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 use std::process::Command;
+use std::fs::File;
+use std::os::unix::io::AsRawFd;
 
 #[cfg(unix)]
-use std::os::fd::AsRawFd;
+use std::os::fd::RawFd;
 #[cfg(unix)]
 use nix::sys::socket::{recvmsg, MsgFlags, ControlMessageOwned, SockaddrStorage};
 #[cfg(unix)]
 use nix::sys::time::TimeSpec;
+#[cfg(unix)]
+use nix::fcntl::{flock, FlockArg}; // For Singleton Lock
 
 mod ptp;
 mod net;
@@ -149,28 +153,41 @@ fn stop_conflicting_services() {
     }
 }
 
-fn enable_realtime_priority() {
+fn acquire_singleton_lock() -> Result<File> {
     #[cfg(unix)]
     {
-        // Try to set SCHED_FIFO with high priority (e.g. 50)
-        // Requires libc
-        unsafe {
-            let policy = libc::SCHED_FIFO;
-            let param = libc::sched_param { sched_priority: 50 };
-            
-            if libc::sched_setscheduler(0, policy, &param) == 0 {
-                info!("Realtime priority (SCHED_FIFO, 50) enabled successfully.");
-            } else {
-                let err = std::io::Error::last_os_error();
-                warn!("Failed to set realtime priority: {}. Latency might suffer.", err);
+        let lock_path = "/var/run/dantetimesync.lock";
+        let file = File::create(lock_path).map_err(|e| anyhow!("Failed to create lock file {}: {}", lock_path, e))?;
+        
+        // Try to acquire exclusive non-blocking lock
+        match flock(file.as_raw_fd(), FlockArg::LockExclusiveNonblock) {
+            Ok(_) => Ok(file),
+            Err(nix::errno::Errno::EAGAIN) | Err(nix::errno::Errno::EWOULDBLOCK) => {
+                Err(anyhow!("Another instance of dantetimesync is already running! (Lockfile: {})", lock_path))
             }
+            Err(e) => Err(e.into()),
         }
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows needs named mutex or similar. Skipping for now as requested context is Linux.
+        Ok(File::create("dantetimesync.lock")?)
     }
 }
 
 fn main() -> Result<()> {
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
     let args = Args::parse();
+
+    // 0. Singleton Check
+    // We hold the file handle. Lock is released when file is closed (process exit).
+    let _lock_file = match acquire_singleton_lock() {
+        Ok(f) => f,
+        Err(e) => {
+            error!("{}", e);
+            std::process::exit(1);
+        }
+    };
 
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
@@ -180,13 +197,10 @@ fn main() -> Result<()> {
         r.store(false, Ordering::SeqCst);
     })?;
 
-    // 0. Stop Conflicting Services
+    // 1. Stop Conflicting Services
     stop_conflicting_services();
-    
-    // 0.5 Enable Realtime Priority
-    enable_realtime_priority();
 
-    // 1. Initialize Clock
+    // 2. Initialize Clock
     let sys_clock = match clock::PlatformClock::new() {
         Ok(c) => c,
         Err(e) => {
@@ -197,11 +211,11 @@ fn main() -> Result<()> {
     };
     info!("System clock control initialized.");
 
-    // 2. Network Interface
+    // 3. Network Interface
     let (iface, iface_ip) = net::get_default_interface()?;
     info!("Selected Interface: {} ({})", iface.name, iface_ip);
     
-    // 3. Sockets
+    // 4. Sockets
     let sock_event = net::create_multicast_socket(ptp::PTP_EVENT_PORT, iface_ip)?;
     let sock_general = net::create_multicast_socket(ptp::PTP_GENERAL_PORT, iface_ip)?;
     info!("Listening on 224.0.1.129 ports 319 (Event) and 320 (General)");
@@ -217,10 +231,10 @@ fn main() -> Result<()> {
 
     let mut controller = PtpController::new(sys_clock, network, ntp_source);
 
-    // 4. NTP Sync
+    // 5. NTP Sync
     controller.run_ntp_sync(args.skip_ntp);
 
-    // 5. Main Loop
+    // 6. Main Loop
     info!("Starting PTP Loop...");
     let mut last_log = Instant::now();
     
