@@ -6,18 +6,11 @@ use windows::Win32::Security::{
     TOKEN_PRIVILEGES, SE_PRIVILEGE_ENABLED
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-// Try importing time functions from SystemInformation if they were moved
 use windows::Win32::System::SystemInformation::{
-    GetSystemTimeAdjustmentPrecise, SetSystemTimeAdjustmentPrecise
+    GetSystemTimeAdjustmentPrecise, SetSystemTimeAdjustmentPrecise,
+    GetSystemTimeAsFileTime
 };
-// If they are not in Time, where are they? 
-// Checking online for windows-rs 0.52...
-// GetSystemTimeAsFileTime is in System::SystemInformation.
-// SetSystemTime is in System::SystemInformation.
-// SystemTimeToFileTime is in System::Time.
-use windows::Win32::System::SystemInformation::{GetSystemTimeAsFileTime, SetSystemTime};
-use windows::Win32::System::Time::{FileTimeToSystemTime}; 
-
+use windows::Win32::System::Time::{FileTimeToSystemTime, SetSystemTime}; 
 use windows::core::PCWSTR;
 use std::time::Duration;
 
@@ -66,8 +59,10 @@ impl WindowsClock {
 
             AdjustTokenPrivileges(token, BOOL(0), Some(&tp), 0, None, None)?;
             
-            // WIN32_ERROR should support equality
-            if GetLastError() == ERROR_NOT_ALL_ASSIGNED {
+            // GetLastError returns WIN32_ERROR which wraps u32.
+            // Direct comparison should work.
+            let err = GetLastError();
+            if err == ERROR_NOT_ALL_ASSIGNED {
                  return Err(anyhow!("Failed to adjust privilege: ERROR_NOT_ALL_ASSIGNED"));
             }
             
@@ -88,8 +83,8 @@ impl SystemClock for WindowsClock {
 
     fn step_clock(&mut self, offset: Duration, sign: i8) -> Result<()> {
         unsafe {
-            let mut ft = FILETIME::default();
-            GetSystemTimeAsFileTime(&mut ft);
+            // GetSystemTimeAsFileTime returns the struct in windows-rs (not void with pointer)
+            let mut ft: FILETIME = GetSystemTimeAsFileTime();
             
             let mut u64_time = (ft.dwHighDateTime as u64) << 32 | (ft.dwLowDateTime as u64);
             let offset_100ns = offset.as_nanos() as u64 / 100;
@@ -108,7 +103,9 @@ impl SystemClock for WindowsClock {
             ft.dwHighDateTime = (u64_time >> 32) as u32;
             
             let mut st = SYSTEMTIME::default();
+            // FileTimeToSystemTime returns BOOL -> Result<()>
             FileTimeToSystemTime(&ft, &mut st)?;
+            // SetSystemTime returns BOOL -> Result<()>
             SetSystemTime(&st)?;
         }
 
