@@ -346,7 +346,8 @@ mod tests {
         fu_pkt_base[32] = 2; 
         fu_pkt_base[22] = 0xAA; 
         
-        let start_t2 = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
+        // Use current time to avoid pending_syncs retention policy dropping packets
+        let start_t2 = SystemTime::now();
         
         let mut seq = Sequence::new();
         
@@ -383,7 +384,6 @@ mod tests {
         }
 
         mock_clock.expect_adjust_frequency()
-            // Removed strict .with() check to isolate flow logic from float precision
             .times(1)
             .returning(|_| Ok(()));
 
