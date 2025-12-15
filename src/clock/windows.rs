@@ -1,15 +1,23 @@
 use super::SystemClock;
 use anyhow::{Result, anyhow};
-use windows::Win32::Foundation::{BOOL, HANDLE, LUID, CloseHandle, GetLastError, ERROR_NOT_ALL_ASSIGNED, SYSTEMTIME, FILETIME};
+use windows::Win32::Foundation::{BOOL, HANDLE, LUID, CloseHandle, GetLastError, ERROR_NOT_ALL_ASSIGNED, SYSTEMTIME, FILETIME, WIN32_ERROR};
 use windows::Win32::Security::{
     AdjustTokenPrivileges, LookupPrivilegeValueW, TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY,
     TOKEN_PRIVILEGES, SE_PRIVILEGE_ENABLED
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+// Try importing time functions from SystemInformation if they were moved
 use windows::Win32::System::SystemInformation::{
     GetSystemTimeAdjustmentPrecise, SetSystemTimeAdjustmentPrecise
 };
-use windows::Win32::System::Time::{GetSystemTimeAsFileTime, FileTimeToSystemTime, SetSystemTime};
+// If they are not in Time, where are they? 
+// Checking online for windows-rs 0.52...
+// GetSystemTimeAsFileTime is in System::SystemInformation.
+// SetSystemTime is in System::SystemInformation.
+// SystemTimeToFileTime is in System::Time.
+use windows::Win32::System::SystemInformation::{GetSystemTimeAsFileTime, SetSystemTime};
+use windows::Win32::System::Time::{FileTimeToSystemTime}; 
+
 use windows::core::PCWSTR;
 use std::time::Duration;
 
@@ -58,7 +66,8 @@ impl WindowsClock {
 
             AdjustTokenPrivileges(token, BOOL(0), Some(&tp), 0, None, None)?;
             
-            if GetLastError().0 == ERROR_NOT_ALL_ASSIGNED.0 {
+            // WIN32_ERROR should support equality
+            if GetLastError() == ERROR_NOT_ALL_ASSIGNED {
                  return Err(anyhow!("Failed to adjust privilege: ERROR_NOT_ALL_ASSIGNED"));
             }
             
