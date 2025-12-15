@@ -1,15 +1,15 @@
 use super::SystemClock;
 use anyhow::{Result, anyhow};
-use windows::Win32::Foundation::{BOOL, HANDLE, LUID, CloseHandle, GetLastError};
+use windows::Win32::Foundation::{BOOL, HANDLE, LUID, CloseHandle, GetLastError, ERROR_NOT_ALL_ASSIGNED};
 use windows::Win32::Security::{
     AdjustTokenPrivileges, LookupPrivilegeValueW, TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY,
-    TOKEN_PRIVILEGES, SE_PRIVILEGE_ENABLED, TOKEN_PRIVILEGES_ATTRIBUTES
+    TOKEN_PRIVILEGES, SE_PRIVILEGE_ENABLED
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::System::SystemInformation::{
-    GetSystemTimeAdjustmentPrecise, SetSystemTimeAdjustmentPrecise, GetSystemTime, SetSystemTime
+    GetSystemTimeAdjustmentPrecise, SetSystemTimeAdjustmentPrecise
 };
-use windows::Win32::System::Time::SYSTEMTIME;
+use windows::Win32::System::Time::{GetSystemTimeAsFileTime, FileTimeToSystemTime, SetSystemTime, SYSTEMTIME, FILETIME};
 use windows::core::PCWSTR;
 use std::time::Duration;
 
@@ -57,13 +57,12 @@ impl WindowsClock {
             tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
 
             AdjustTokenPrivileges(token, BOOL(0), Some(&tp), 0, None, None)?;
-            if GetLastError().is_err() {
-                 let err = GetLastError();
-                 if err.0 != 0 {
-                     return Err(anyhow!("Failed to adjust privilege: {:?}", err));
-                 }
+            
+            if GetLastError() == ERROR_NOT_ALL_ASSIGNED {
+                 return Err(anyhow!("Failed to adjust privilege: ERROR_NOT_ALL_ASSIGNED"));
             }
-            CloseHandle(token);
+            
+            CloseHandle(token)?;
         }
         Ok(())
     }
@@ -79,12 +78,6 @@ impl SystemClock for WindowsClock {
     }
 
     fn step_clock(&mut self, offset: Duration, sign: i8) -> Result<()> {
-        // Windows SetSystemTime uses SYSTEMTIME struct which is broken down (Y/M/D H:M:S.ms)
-        // Calculating offsets in SYSTEMTIME is painful.
-        // Easier: Get SystemTime as FileTime (u64), add offset, convert back to SystemTime, Set.
-        
-        use windows::Win32::System::Time::{GetSystemTimeAsFileTime, FileTimeToSystemTime, FILETIME};
-        
         unsafe {
             let mut ft = FILETIME::default();
             GetSystemTimeAsFileTime(&mut ft);
@@ -106,13 +99,8 @@ impl SystemClock for WindowsClock {
             ft.dwHighDateTime = (u64_time >> 32) as u32;
             
             let mut st = SYSTEMTIME::default();
-            if FileTimeToSystemTime(&ft, &mut st).as_bool() {
-                if !SetSystemTime(&st).as_bool() {
-                    return Err(anyhow!("SetSystemTime failed"));
-                }
-            } else {
-                 return Err(anyhow!("FileTimeToSystemTime failed"));
-            }
+            FileTimeToSystemTime(&ft, &mut st)?;
+            SetSystemTime(&st)?;
         }
 
         Ok(())

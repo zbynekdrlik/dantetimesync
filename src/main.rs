@@ -7,9 +7,8 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 use std::process::Command;
 use std::fs::File;
-
-#[cfg(unix)]
 use std::os::unix::io::AsRawFd;
+
 #[cfg(unix)]
 use std::os::fd::RawFd;
 #[cfg(unix)]
@@ -89,15 +88,13 @@ impl RealPtpNetwork {
                 
                 Ok(Some((msg.bytes, timestamp)))
             }
-            Err(nix::errno::Errno::EAGAIN) | Err(nix::errno::Errno::EWOULDBLOCK) => Ok(None),
+            Err(nix::errno::Errno::EAGAIN) => Ok(None),
             Err(e) => Err(e.into()),
         }
     }
 
     #[cfg(not(unix))]
     fn recv_with_timestamp(sock: &std::net::UdpSocket, buf: &mut [u8]) -> Result<Option<(usize, SystemTime)>> {
-        // Windows Fallback: User-space timestamping.
-        // Precision is limited by scheduler jitter, but mitigated by Realtime Priority and timeBeginPeriod(1).
         match sock.recv_from(buf) {
             Ok((size, _)) => Ok(Some((size, SystemTime::now()))),
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => Ok(None),
@@ -143,11 +140,8 @@ fn stop_conflicting_services() {
                 if out.status.success() {
                     info!("W32Time stopped successfully.");
                 } else {
-                    // Ignore if already stopped (code 2)
                     let err = String::from_utf8_lossy(&out.stderr);
-                    if !err.contains("The service has not been started") {
-                         warn!("Failed to stop W32Time: {}", err);
-                    }
+                    warn!("Failed to stop W32Time (ignoring if already stopped): {}", err);
                 }
             }
             Err(e) => warn!("Failed to execute 'net stop w32time': {}", e),
@@ -182,22 +176,20 @@ fn enable_realtime_priority() {
     #[cfg(windows)]
     {
         unsafe {
-            // Set REALTIME_PRIORITY_CLASS (Highest possible)
-            // If this is too dangerous (hangs UI), HIGH_PRIORITY_CLASS is fallback.
-            // But for SOTA sync, Realtime is preferred.
-            if SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS).as_bool() {
+            // SetPriorityClass returns Result<()>
+            if SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS).is_ok() {
                 info!("Windows Realtime Priority enabled.");
             } else {
                 warn!("Failed to set Windows Realtime Priority. Trying High...");
-                if SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS).as_bool() {
+                if SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS).is_ok() {
                     info!("Windows High Priority enabled.");
                 } else {
                     warn!("Failed to set Windows priority.");
                 }
             }
             
-            // Force 1ms Timer Resolution
-            if timeBeginPeriod(1) == 0 { // TIMERR_NOERROR = 0
+            // timeBeginPeriod(1) returns u32 (TIMERR_NOERROR = 0)
+            if timeBeginPeriod(1) == 0 { 
                 info!("Windows High-Res Timer (1ms) enabled.");
             } else {
                 warn!("Failed to set Windows High-Res Timer.");
@@ -222,10 +214,6 @@ fn acquire_singleton_lock() -> Result<File> {
     }
     #[cfg(not(unix))]
     {
-        // Simple file check for Windows (flock not available in std)
-        // A robust Windows mutex would use NamedMutex, but File locking is harder to make non-blocking/exclusive cross-process without winapi.
-        // For now, we rely on the Service Manager (SCM) single instance behavior.
-        // Or create a dummy file and keep it open (Windows file sharing rules default to exclusive write).
         let file = File::create("dantetimesync.lock")?;
         Ok(file)
     }
@@ -257,7 +245,6 @@ fn main() -> Result<()> {
 
     stop_conflicting_services();
     
-    // Enable Priority/Timers BEFORE clock/net init
     enable_realtime_priority();
 
     let sys_clock = match clock::PlatformClock::new() {

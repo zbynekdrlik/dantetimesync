@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use anyhow::{Result, anyhow};
 use std::fs::OpenOptions;
 use std::os::unix::io::AsRawFd;
