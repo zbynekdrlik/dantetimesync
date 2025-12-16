@@ -14,33 +14,88 @@ apt-get update
 # util-linux provides hwclock (if available on platform)
 apt-get install -y build-essential curl util-linux
 
-# 2. Install Rust (if missing)
-if ! command -v cargo &> /dev/null; then
-    echo ">>> Installing Rust..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source "$HOME/.cargo/env" || source "/root/.cargo/env"
+# 1. Install System Dependencies
+echo ">>> Installing system dependencies..."
+apt-get update
+# util-linux provides hwclock
+apt-get install -y build-essential curl util-linux
+
+# 2. Try to Download Binary (x86_64 only)
+ARCH=$(uname -m)
+SKIP_BUILD=false
+
+if [ "$ARCH" == "x86_64" ]; then
+    echo ">>> Detected x86_64 architecture. Attempting to download latest release..."
+    DOWNLOAD_URL="https://github.com/zbynekdrlik/dantetimesync/releases/latest/download/dantetimesync-linux-amd64"
+    
+    if curl --fail -L -o dantetimesync_bin "$DOWNLOAD_URL"; then
+        echo ">>> Download successful."
+        
+        echo ">>> Stopping existing service..."
+        systemctl stop dantetimesync 2>/dev/null || true
+        
+        echo ">>> Installing binary to /usr/local/bin/..."
+        chmod +x dantetimesync_bin
+        mv dantetimesync_bin /usr/local/bin/dantetimesync
+        SKIP_BUILD=true
+    else
+        echo ">>> Download failed. Falling back to source build."
+    fi
 else
-    echo ">>> Rust is already installed."
+    echo ">>> Architecture $ARCH detected. Building from source required."
 fi
 
-# 3. Build Release Binary
-echo ">>> Building dantetimesync..."
-# Ensure cargo is in path if we just installed it or are in sudo
-export PATH="$HOME/.cargo/bin:/root/.cargo/bin:$PATH"
-cargo build --release
+# 3. Build Release Binary (If download skipped or failed)
+if [ "$SKIP_BUILD" = false ]; then
+    # Install Rust
+    if ! command -v cargo &> /dev/null; then
+        echo ">>> Installing Rust..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source "$HOME/.cargo/env" || source "/root/.cargo/env"
+    fi
 
-# 4. Install Binary
-echo ">>> Stopping existing service (if running)..."
-systemctl stop dantetimesync 2>/dev/null || true
+    echo ">>> Building dantetimesync from source..."
+    # Ensure cargo is in path
+    export PATH="$HOME/.cargo/bin:/root/.cargo/bin:$PATH"
+    
+    # We assume the script is run inside the repo or we need to clone it?
+    # The curl | bash usage assumes we are NOT in the repo usually?
+    # Wait! "curl ... | bash" runs the script content.
+    # The script says "cargo build --release".
+    # This assumes the Current Working Directory IS the repo.
+    # But "curl ... | bash" runs in whatever dir the user is in.
+    # If the user runs it from /home/user, "cargo build" fails because no Cargo.toml.
+    
+    # The WINDOWS installer downloads the EXE.
+    # The LINUX installer (as written previously) assumed user cloned the repo?
+    # My instructions were: "git clone ... cd ... sudo ./install.sh".
+    # So CWD is repo.
+    
+    # BUT, if the user wants "curl | bash" ONE LINER without cloning?
+    # Then I MUST clone inside the script if I need to build.
+    # OR the download method is the ONLY way for "curl | bash" without clone.
+    
+    # If I want to support "curl | bash" for Source Build, I must git clone to temp dir.
+    
+    if [ ! -f "Cargo.toml" ]; then
+        echo ">>> Cargo.toml not found. Cloning repository to build..."
+        cd $(mktemp -d)
+        git clone https://github.com/zbynekdrlik/dantetimesync.git .
+    fi
 
-echo ">>> Installing binary to /usr/local/bin/..."
-cp target/release/dantetimesync /usr/local/bin/
-chmod +x /usr/local/bin/dantetimesync
+    cargo build --release
+    
+    echo ">>> Stopping existing service..."
+    systemctl stop dantetimesync 2>/dev/null || true
 
+    echo ">>> Installing binary to /usr/local/bin/..."
+    cp target/release/dantetimesync /usr/local/bin/
+    chmod +x /usr/local/bin/dantetimesync
+fi
+
+# 4. Create Config Dir
 echo ">>> Creating configuration directory..."
 mkdir -p /etc/dantetimesync
-# Default config creation could go here, but app creates it if missing (if writable)
-# We need to ensure the service user (root) can write to it? Yes, root can.
 
 # 5. Disable Conflicting Services
 echo ">>> Disabling conflicting time services..."
