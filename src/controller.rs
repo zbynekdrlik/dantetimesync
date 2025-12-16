@@ -115,7 +115,7 @@ where
         match self.ntp.get_offset() {
             Ok((offset, sign)) => {
                 let sign_str = if sign > 0 { "+" } else { "-" };
-                info!("NTP Offset: {}{:?}", sign_str, offset);
+                info!("NTP Sync Successful. Offset: {}{:?}", sign_str, offset);
                 
                 if offset.as_millis() > 50 {
                     info!("Stepping clock (NTP)...");

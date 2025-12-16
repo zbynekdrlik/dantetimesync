@@ -429,6 +429,9 @@ fn run_sync_loop(args: Args, running: Arc<AtomicBool>) -> Result<()> {
 
     let mut controller = PtpController::new(sys_clock, network, ntp_source, status_shared);
     
+    if !args.skip_ntp {
+        info!("Using NTP Server: {}", args.ntp_server);
+    }
     controller.run_ntp_sync(args.skip_ntp);
 
     info!("Starting PTP Loop...");
