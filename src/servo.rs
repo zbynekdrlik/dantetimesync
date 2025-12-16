@@ -44,9 +44,9 @@ impl PiServo {
 
         let adjustment_ppm = proportional + self.integral;
         
-        // Clamp total adjustment to reasonable limits (e.g. +/- 500 ppm)
-        // This prevents the clock from being skewed so wildly that it causes oscillation.
-        let max_adj = 500.0;
+        // Clamp total adjustment to reasonable limits (e.g. +/- 5000 ppm)
+        // 500 ppm was too tight for some Windows systems. 5000 ppm (0.5%) is safe.
+        let max_adj = 5000.0;
         let final_adj = if adjustment_ppm > max_adj { 
             max_adj 
         } else if adjustment_ppm < -max_adj { 
@@ -81,10 +81,10 @@ mod tests {
         let mut servo = PiServo::new(1.0, 0.0); // High Kp
         
         // Huge offset: 1s = 1,000,000,000ns.
-        // P = -1,000,000,000 * 1.0 = -1e9.
-        // Should clamp to -500.0
+        // P = -1e9.
+        // Should clamp to -5000.0
         let adj = servo.sample(1_000_000_000);
-        assert_eq!(adj, -500.0);
+        assert_eq!(adj, -5000.0);
     }
 
     #[test]
@@ -121,5 +121,8 @@ mod tests {
         servo.sample(-300); // Error 300. I += 300 -> Clamped to 200.
         
         assert!((servo.integral - 200.0).abs() < 0.0001);
+        
+        let adj = servo.sample(0); // Error 0. Adj = I = 200.
+        assert!((adj - 200.0).abs() < 0.0001);
     }
 }
