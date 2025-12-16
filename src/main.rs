@@ -32,7 +32,7 @@ use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToS
 #[cfg(windows)]
 use windows::Win32::System::Pipes::{CreateNamedPipeW, NAMED_PIPE_MODE};
 #[cfg(windows)]
-use windows::Win32::Storage::FileSystem::{FILE_FLAG_OVERLAPPED, FILE_FLAGS_AND_ATTRIBUTES};
+use windows::Win32::Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES};
 #[cfg(windows)]
 use windows::core::PCWSTR;
 #[cfg(windows)]
