@@ -11,33 +11,7 @@ $DataDir = "C:\ProgramData\DanteTimeSync"
 
 Write-Host ">>> Dante Time Sync Windows Installer <<<" -ForegroundColor Cyan
 
-# 1. Check for Npcap/WinPcap
-if (!(Test-Path "C:\Windows\System32\Packet.dll")) {
-    Write-Warning "Npcap or WinPcap does not appear to be installed (Packet.dll missing)."
-    
-    $InstallNpcap = Read-Host "Do you want to download and install Npcap automatically? (Y/n) [Default: Y]"
-    if ($InstallNpcap -eq 'Y' -or $InstallNpcap -eq 'y' -or $InstallNpcap -eq '') {
-        Write-Host "Downloading Npcap..."
-        $NpcapUrl = "https://npcap.com/dist/npcap-1.79.exe"
-        $NpcapPath = "$env:TEMP\npcap-1.79.exe"
-        try {
-            Invoke-WebRequest -Uri $NpcapUrl -OutFile $NpcapPath
-            Write-Host "Installing Npcap (Silent mode, WinPcap compatibility enabled)..."
-            Start-Process -FilePath $NpcapPath -ArgumentList "/S", "/winpcap_mode=yes" -Wait
-            Write-Host "Npcap installed successfully."
-        } catch {
-            Write-Error "Failed to install Npcap automatically: $_"
-            Write-Host "Please install it manually from $NpcapUrl"
-            Read-Host "Press Enter to continue..."
-        }
-    } else {
-        Write-Host "Please install Npcap from https://npcap.com/dist/npcap-1.79.exe (Select 'Install Npcap in WinPcap API-compatible Mode')" -ForegroundColor Yellow
-        Write-Host "Press Enter to continue if you have installed it, or Ctrl+C to exit..."
-        Read-Host
-    }
-}
-
-# 2. Create Directories
+# 1. Create Directories
 if (!(Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }

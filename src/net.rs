@@ -1,75 +1,59 @@
 use anyhow::{Result, anyhow};
-use pnet_datalink::{self, NetworkInterface};
 use socket2::{Socket, Domain, Type, Protocol};
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, UdpSocket};
+use if_addrs::get_if_addrs;
 
+#[cfg(unix)]
+use std::os::fd::AsFd;
 #[cfg(unix)]
 use nix::sys::socket::{setsockopt, sockopt};
 
-pub fn get_default_interface() -> Result<(NetworkInterface, Ipv4Addr)> {
-    let interfaces = pnet_datalink::interfaces();
-    let usable_interfaces: Vec<&NetworkInterface> = interfaces.iter()
-        .filter(|iface| {
-            let has_ip = !iface.ips.is_empty();
-            let is_loopback = iface.is_loopback();
-            // On Windows, Npcap often reports interfaces as "Down" (is_up() == false)
-            // even when they are working. We relax the check if IPs are present.
-            let is_up = iface.is_up() || (cfg!(windows) && has_ip);
-            
-            is_up && !is_loopback && has_ip
-        })
+pub fn get_default_interface() -> Result<(String, Ipv4Addr)> {
+    let interfaces = get_if_addrs()?;
+    
+    // We want a non-loopback IPv4 interface.
+    // if-addrs returns one entry per IP.
+    
+    let valid_interfaces: Vec<_> = interfaces.iter()
+        .filter(|iface| !iface.is_loopback() && iface.ip().is_ipv4())
         .collect();
 
-    if usable_interfaces.is_empty() {
+    if valid_interfaces.is_empty() {
         log::warn!("No suitable network interface found. Diagnostics:");
         for iface in &interfaces {
-            log::warn!(" - Name: '{}', Desc: '{}', Up: {}, Loop: {}, IPs: {:?} (Wireless: {})", 
-                iface.name, 
-                iface.description,
-                iface.is_up(), 
-                iface.is_loopback(), 
-                iface.ips,
-                iface.name.to_lowercase().contains("wifi") || iface.description.to_lowercase().contains("wifi")
-            );
+            log::warn!(" - Name: '{}', IP: {:?}, Loopback: {}", 
+                iface.name, iface.ip(), iface.is_loopback());
         }
         return Err(anyhow!("No suitable network interface found"));
     }
 
+    // Heuristic: Prefer non-wireless? 
+    // On Windows, names might be GUIDs, so "wifi" check is unreliable without description.
+    // We'll just pick the first valid one, or try to avoid 169.254 (APIPA).
+    
     let mut best_iface = None;
-    let mut best_ip = None;
-
-    for iface in usable_interfaces {
-        let ipv4 = iface.ips.iter().find(|ip| ip.is_ipv4()).map(|ip| {
-             if let IpAddr::V4(addr) = ip.ip() { addr } else { unreachable!() }
-        });
-
-        if let Some(ip) = ipv4 {
-            let name_lower = iface.name.to_lowercase();
-            let desc_lower = iface.description.to_lowercase();
-            let is_likely_wireless = name_lower.contains("wlan") || name_lower.contains("wifi") || name_lower.contains("wireless") ||
-                                   desc_lower.contains("wlan") || desc_lower.contains("wifi") || desc_lower.contains("wireless");
-            
-            if !is_likely_wireless {
-                best_iface = Some(iface.clone());
-                best_ip = Some(ip);
-                break;
-            } else if best_iface.is_none() {
-                best_iface = Some(iface.clone());
-                best_ip = Some(ip);
+    
+    for iface in valid_interfaces {
+        let ip = if let IpAddr::V4(ip) = iface.ip() { ip } else { continue };
+        
+        // Skip APIPA (169.254.x.x) if possible, unless it's the only one.
+        if ip.is_link_local() {
+            if best_iface.is_none() {
+                best_iface = Some((iface.name.clone(), ip));
             }
+            continue;
         }
+        
+        // Found a good IP
+        return Ok((iface.name.clone(), ip));
     }
 
-    match (best_iface, best_ip) {
-        (Some(iface), Some(ip)) => Ok((iface, ip)),
-        _ => {
-            log::warn!("No suitable IPv4 interface selected from candidates:");
-            for iface in &interfaces {
-                log::warn!(" - Name: '{}', Desc: '{}', IPs: {:?}", iface.name, iface.description, iface.ips);
-            }
-            Err(anyhow!("No suitable IPv4 interface found"))
-        }
+    // Fallback to link-local if found
+    if let Some(res) = best_iface {
+        return Ok(res);
     }
+
+    Err(anyhow!("No suitable IPv4 interface found"))
 }
 
 pub fn create_multicast_socket(port: u16, interface_ip: Ipv4Addr) -> Result<UdpSocket> {
