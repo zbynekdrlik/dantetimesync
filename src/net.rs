@@ -38,7 +38,9 @@ pub fn get_default_interface() -> Result<(NetworkInterface, Ipv4Addr)> {
 
         if let Some(ip) = ipv4 {
             let name_lower = iface.name.to_lowercase();
-            let is_likely_wireless = name_lower.contains("wlan") || name_lower.contains("wifi") || name_lower.contains("wireless");
+            let desc_lower = iface.description.to_lowercase();
+            let is_likely_wireless = name_lower.contains("wlan") || name_lower.contains("wifi") || name_lower.contains("wireless") ||
+                                   desc_lower.contains("wlan") || desc_lower.contains("wifi") || desc_lower.contains("wireless");
             
             if !is_likely_wireless {
                 best_iface = Some(iface.clone());
@@ -53,7 +55,20 @@ pub fn get_default_interface() -> Result<(NetworkInterface, Ipv4Addr)> {
 
     match (best_iface, best_ip) {
         (Some(iface), Some(ip)) => Ok((iface, ip)),
-        _ => Err(anyhow!("No suitable IPv4 interface found")),
+        _ => {
+            log::warn!("No suitable network interface found. Diagnostics:");
+            for iface in &interfaces {
+                log::warn!(" - Name: '{}', Desc: '{}', Up: {}, Loop: {}, IPs: {:?} (Wireless: {})", 
+                    iface.name, 
+                    iface.description,
+                    iface.is_up(), 
+                    iface.is_loopback(), 
+                    iface.ips,
+                    iface.name.to_lowercase().contains("wifi") || iface.description.to_lowercase().contains("wifi")
+                );
+            }
+            Err(anyhow!("No suitable network interface found"))
+        }
     }
 }
 
