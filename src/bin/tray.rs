@@ -34,12 +34,46 @@ mod app {
         let width = 32;
         let height = 32;
         let mut rgba = Vec::with_capacity((width * height * 4) as usize);
-        for _ in 0..height {
-            for _ in 0..width {
-                rgba.push(r);
-                rgba.push(g);
-                rgba.push(b);
-                rgba.push(255);
+        
+        let cx = 16.0;
+        let cy = 16.0;
+        let radius = 14.0;
+        let border_width = 2.0;
+        
+        for y in 0..height {
+            for x in 0..width {
+                let dx = x as f32 - cx + 0.5;
+                let dy = y as f32 - cy + 0.5;
+                let dist = (dx*dx + dy*dy).sqrt();
+                
+                if dist <= radius {
+                    let mut alpha = 255u8;
+                    // Antialiasing at the edge
+                    if dist > radius - 1.0 {
+                        alpha = ((radius - dist) * 255.0) as u8;
+                    }
+
+                    // Border logic
+                    if dist > radius - border_width {
+                        // Darker border (30% darker)
+                        rgba.push((r as f32 * 0.7) as u8);
+                        rgba.push((g as f32 * 0.7) as u8);
+                        rgba.push((b as f32 * 0.7) as u8);
+                        rgba.push(alpha);
+                    } else {
+                        // Main fill
+                        rgba.push(r);
+                        rgba.push(g);
+                        rgba.push(b);
+                        rgba.push(alpha);
+                    }
+                } else {
+                    // Transparent
+                    rgba.push(0);
+                    rgba.push(0);
+                    rgba.push(0);
+                    rgba.push(0);
+                }
             }
         }
         Icon::from_rgba(rgba, width, height).unwrap()
@@ -51,22 +85,28 @@ mod app {
         
         let quit_i = MenuItem::new("Quit", true, None);
         let status_i = MenuItem::new("Status: Connecting...", false, None);
+        let log_i = MenuItem::new("Open Log File", true, None);
+        
         let menu = Menu::new();
         menu.append(&status_i).unwrap();
-        menu.append_items(&[&tray_icon::menu::PredefinedMenuItem::separator(), &quit_i]).unwrap();
+        menu.append(&tray_icon::menu::PredefinedMenuItem::separator()).unwrap();
+        menu.append(&log_i).unwrap();
+        menu.append(&tray_icon::menu::PredefinedMenuItem::separator()).unwrap();
+        menu.append(&quit_i).unwrap();
 
-        let red_icon = generate_icon(255, 0, 0);
-        let green_icon = generate_icon(0, 255, 0);
-        let yellow_icon = generate_icon(255, 255, 0);
+        // Nicer Colors (Flat UI / Bootstrap-ish)
+        let red_icon = generate_icon(220, 53, 69);    // Danger Red
+        let green_icon = generate_icon(40, 167, 69);  // Success Green
+        let yellow_icon = generate_icon(255, 193, 7); // Warning Yellow
 
         let tray_icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu.clone()))
             .with_tooltip("Dante Time Sync - Connecting...")
-            .with_icon(red_icon.clone())
+            .with_icon(yellow_icon.clone()) // Start with Yellow (Settling/Connecting) instead of Red
             .build()
             .unwrap();
 
-        // Spawn poller thread
+        // Spawn poller thread... (kept same)
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -133,6 +173,10 @@ mod app {
                     if let Ok(event) = menu_channel.try_recv() {
                         if event.id == quit_i.id() {
                             elwt.exit();
+                        } else if event.id == log_i.id() {
+                            let _ = std::process::Command::new("notepad.exe")
+                                .arg(r"C:\Program Files\DanteTimeSync\dantetimesync.log")
+                                .spawn();
                         }
                     }
                 }
