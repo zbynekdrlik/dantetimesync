@@ -113,9 +113,11 @@ impl SystemClock for WindowsClock {
 
         unsafe {
             // Log the adjustment attempt for debugging
-            log::debug!("Adjusting frequency (Legacy): PPM={:.3}, Base={}, NewAdj={}", ppm, self.nominal_frequency, new_adj);
+            log::debug!("Adjusting frequency (Legacy+Toggle): PPM={:.3}, Base={}, NewAdj={}", ppm, self.nominal_frequency, new_adj);
 
-            // Use Legacy API as Precise API seems to ignore the sanitized increment on this VM
+            // Toggle Disable/Enable to force update if OS latches the value
+            let _ = SetSystemTimeAdjustment(0, true);
+            
             if SetSystemTimeAdjustment(new_adj, false).is_ok() {
                 Ok(())
             } else {
