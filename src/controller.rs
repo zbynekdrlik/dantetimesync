@@ -12,9 +12,18 @@ use crate::status::SyncStatus;
 use crate::rtc;
 
 // Constants
-const MIN_DELTA_NS: i64 = 0;               // Allow 0ms (bursts/quantization)
+#[cfg(windows)]
+const MIN_DELTA_NS: i64 = 0;               // Allow 0ms (bursts/quantization) on Windows
+#[cfg(not(windows))]
+const MIN_DELTA_NS: i64 = 1_000_000;       // 1ms on Linux
+
+#[cfg(windows)]
+const MASSIVE_DRIFT_THRESHOLD_NS: i64 = 10_000_000; // 10ms on Windows (High Jitter/Drift)
+#[cfg(not(windows))]
+const MASSIVE_DRIFT_THRESHOLD_NS: i64 = 500_000;    // 500us on Linux (Precision)
+
 const MAX_DELTA_NS: i64 = 2_000_000_000;   // 2s
-const MAX_PHASE_OFFSET_FOR_STEP_NS: i64 = 1_000_000; // 1ms (Reduced from 10ms to force tighter initial alignment)
+const MAX_PHASE_OFFSET_FOR_STEP_NS: i64 = 10_000_000; // 10ms (Initial alignment)
 const RTC_UPDATE_INTERVAL: Duration = Duration::from_secs(600); // 10 minutes
 const SAMPLE_WINDOW_SIZE: usize = 4; // Reduced to 4 to speed up servo reaction
 
@@ -69,11 +78,16 @@ where
     S: NtpSource
 {
     pub fn new(clock: C, network: N, ntp: S, status_shared: Arc<RwLock<SyncStatus>>) -> Self {
+        #[cfg(windows)]
+        let servo = PiServo::new(0.1, 0.001); // Aggressive for Windows VM
+        #[cfg(not(windows))]
+        let servo = PiServo::new(0.0005, 0.00005); // Standard for Linux
+
         PtpController {
             clock,
             network,
             ntp,
-            servo: PiServo::new(0.1, 0.001), // More aggressive gains for VM environments
+            servo,
             pending_syncs: HashMap::new(),
             prev_t1_ns: 0,
             prev_t2_ns: 0,
@@ -283,9 +297,9 @@ where
                 info!("Sync established. Updating RTC...");
                 self.update_rtc_now();
             } else {
-                // Check for massive drift while settled (> 10ms)
-                if phase_offset_ns.abs() > 10_000_000 {
-                     warn!("Large offset {}ms detected while settled. Stepping clock (Servo Integral maintained).", phase_offset_ns / 1_000_000);
+                // Check for massive drift while settled
+                if phase_offset_ns.abs() > MASSIVE_DRIFT_THRESHOLD_NS {
+                     warn!("Large offset {}us detected while settled. Stepping clock (Servo Integral maintained).", phase_offset_ns / 1_000);
                      
                      let step_duration = Duration::from_nanos(phase_offset_ns.abs() as u64);
                      let sign = if phase_offset_ns > 0 { -1 } else { 1 };
