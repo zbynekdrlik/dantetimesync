@@ -26,6 +26,15 @@ impl WindowsClock {
     pub fn new() -> Result<Self> {
         Self::enable_privilege("SeSystemtimePrivilege")?;
 
+        // Reset any existing adjustments to ensure a clean state
+        unsafe {
+            // Try to disable Precise first (if available)
+            // We ignore errors here as it might not be active or available
+            let _ = SetSystemTimeAdjustmentPrecise(0, true);
+            // Disable Legacy
+            let _ = SetSystemTimeAdjustment(0, true);
+        }
+
         // Use Precise API if available (Windows 10+)
         // Fallback to legacy if needed? 
         // We assume modern Windows for now.
