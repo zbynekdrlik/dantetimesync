@@ -13,6 +13,7 @@ use windows::Win32::System::SystemInformation::{
 use windows::Win32::System::Time::{FileTimeToSystemTime}; 
 use windows::core::PCWSTR;
 use std::time::Duration;
+use log::info;
 
 pub struct WindowsClock {
     original_adjustment: u64,
@@ -32,6 +33,8 @@ impl WindowsClock {
         unsafe {
             GetSystemTimeAdjustmentPrecise(&mut adj, &mut inc, &mut disabled)?;
         }
+        
+        info!("Windows Clock Initial State: Adj={}, Inc={}, Disabled={}", adj, inc, disabled.as_bool());
 
         Ok(WindowsClock {
             original_adjustment: adj,
