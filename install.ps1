@@ -11,7 +11,25 @@ $DataDir = "C:\ProgramData\DanteTimeSync"
 
 Write-Host ">>> Dante Time Sync Windows Installer <<<" -ForegroundColor Cyan
 
-# 1. Create Directories
+# 1. Check for Npcap/WinPcap (Required for High Precision)
+if (!(Test-Path "C:\Windows\System32\Packet.dll")) {
+    Write-Warning "Npcap or WinPcap does not appear to be installed (Packet.dll missing)."
+    Write-Host "Downloading Npcap (Required for PTP precision)..."
+    $NpcapUrl = "https://npcap.com/dist/npcap-1.79.exe"
+    $NpcapPath = "$env:TEMP\npcap-1.79.exe"
+    try {
+        Invoke-WebRequest -Uri $NpcapUrl -OutFile $NpcapPath
+        Write-Host "Installing Npcap (Silent mode, WinPcap compatibility enabled)..."
+        Start-Process -FilePath $NpcapPath -ArgumentList "/S", "/winpcap_mode=yes" -Wait
+        Write-Host "Npcap installed successfully."
+    } catch {
+        Write-Error "Failed to install Npcap automatically: $_"
+        Write-Host "Please install it manually from $NpcapUrl"
+        Read-Host "Press Enter to continue..."
+    }
+}
+
+# 2. Create Directories
 if (!(Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }

@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 use socket2::{Socket, Domain, Type, Protocol};
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, UdpSocket};
-use if_addrs::get_if_addrs;
+use pcap::Device;
 
 #[cfg(unix)]
 use std::os::fd::AsFd;
@@ -9,54 +9,64 @@ use std::os::fd::AsFd;
 use nix::sys::socket::{setsockopt, sockopt};
 
 pub fn get_default_interface() -> Result<(String, Ipv4Addr)> {
-    let interfaces = get_if_addrs()?;
+    let devices = Device::list()?;
     
-    // We want a non-loopback IPv4 interface.
-    // if-addrs returns one entry per IP.
-    
-    let valid_interfaces: Vec<_> = interfaces.iter()
-        .filter(|iface| !iface.is_loopback() && iface.ip().is_ipv4())
+    let valid_devices: Vec<_> = devices.iter()
+        .filter(|d| !d.addresses.is_empty())
         .collect();
 
-    if valid_interfaces.is_empty() {
-        log::warn!("No suitable network interface found. Diagnostics:");
-        for iface in &interfaces {
-            log::warn!(" - Name: '{}', IP: {:?}, Loopback: {}", 
-                iface.name, iface.ip(), iface.is_loopback());
-        }
+    if valid_devices.is_empty() {
+        log::warn!("No network interfaces found via Pcap.");
         return Err(anyhow!("No suitable network interface found"));
     }
 
-    // Heuristic: Prefer non-wireless? 
-    // On Windows, names might be GUIDs, so "wifi" check is unreliable without description.
-    // We'll just pick the first valid one, or try to avoid 169.254 (APIPA).
-    
     let mut best_iface = None;
     
-    for iface in valid_interfaces {
-        let ip = if let IpAddr::V4(ip) = iface.ip() { ip } else { continue };
-        
-        // Skip APIPA (169.254.x.x) if possible, unless it's the only one.
-        if ip.is_link_local() {
-            if best_iface.is_none() {
-                best_iface = Some((iface.name.clone(), ip));
+    for dev in valid_devices {
+        // Find IPv4
+        let ipv4 = dev.addresses.iter().find(|a| {
+            if let Some(socket_addr) = a.addr.as_socket_addr() {
+                socket_addr.is_ipv4() && !socket_addr.ip().is_loopback()
+            } else {
+                false
             }
-            continue;
+        });
+
+        if let Some(ipv4_addr) = ipv4 {
+            let ip = if let std::net::SocketAddr::V4(addr) = ipv4_addr.addr.as_socket_addr().unwrap() {
+                *addr.ip()
+            } else {
+                continue;
+            };
+
+            // Prefer non-wireless/non-loopback (already filtered loopback).
+            // Pcap names are like \Device\NPF_{...}. Description has text.
+            let desc = dev.description.as_deref().unwrap_or("").to_lowercase();
+            let is_wireless = desc.contains("wireless") || desc.contains("wi-fi") || desc.contains("wlan");
+            
+            if !is_wireless {
+                return Ok((dev.name.clone(), ip));
+            } else if best_iface.is_none() {
+                best_iface = Some((dev.name.clone(), ip));
+            }
         }
-        
-        // Found a good IP
-        return Ok((iface.name.clone(), ip));
     }
 
-    // Fallback to link-local if found
     if let Some(res) = best_iface {
         return Ok(res);
+    }
+
+    // Diagnostics
+    log::warn!("No suitable IPv4 interface found. Diagnostics:");
+    for dev in devices {
+        log::warn!(" - Name: {}, Desc: {:?}, Addrs: {:?}", dev.name, dev.description, dev.addresses);
     }
 
     Err(anyhow!("No suitable IPv4 interface found"))
 }
 
 pub fn create_multicast_socket(port: u16, interface_ip: Ipv4Addr) -> Result<UdpSocket> {
+    // Standard UDP socket creation for TX (Transmission) or legacy RX
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
     
     socket.set_reuse_address(true)?;
@@ -74,8 +84,6 @@ pub fn create_multicast_socket(port: u16, interface_ip: Ipv4Addr) -> Result<UdpS
 
     #[cfg(unix)]
     {
-        // Enable Kernel Timestamping (SO_TIMESTAMPNS)
-        // Pass &udp_socket which implements AsFd
         match setsockopt(&udp_socket, sockopt::ReceiveTimestampns, &true) {
             Ok(_) => log::info!("Kernel timestamping (SO_TIMESTAMPNS) enabled."),
             Err(e) => log::warn!("Failed to enable kernel timestamping: {}", e),

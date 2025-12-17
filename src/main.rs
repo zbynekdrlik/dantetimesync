@@ -95,6 +95,58 @@ use traits::{NtpSource, PtpNetwork};
 use controller::PtpController;
 use status::SyncStatus;
 
+#[cfg(windows)]
+struct PcapPtpNetwork {
+    capture: pcap::Capture<pcap::Active>,
+}
+
+#[cfg(windows)]
+impl PcapPtpNetwork {
+    fn new(device_name: &str) -> Result<Self> {
+        let mut cap = pcap::Capture::from_device(device_name)?
+            .promisc(true)
+            .snaplen(2048)
+            .timeout(10) // ms
+            .open()?;
+            
+        cap.filter("udp port 319 or udp port 320", true)?;
+        
+        Ok(Self { capture: cap })
+    }
+}
+
+#[cfg(windows)]
+impl PtpNetwork for PcapPtpNetwork {
+    fn recv_packet(&mut self) -> Result<Option<(Vec<u8>, usize, SystemTime)>> {
+        match self.capture.next_packet() {
+            Ok(packet) => {
+                let ts_sec = packet.header.ts.tv_sec as u64;
+                let ts_usec = packet.header.ts.tv_usec as u32;
+                let timestamp = SystemTime::UNIX_EPOCH + Duration::new(ts_sec, ts_usec * 1000);
+                
+                let data = packet.data;
+                // Basic IPv4 parsing (Ethernet 14 + IP 20 + UDP 8 = 42)
+                if data.len() < 42 { return Ok(None); }
+                
+                // EtherType 0x0800 (IPv4)
+                if data[12] == 0x08 && data[13] == 0x00 {
+                    let ip_header_len = (data[14] & 0x0F) * 4;
+                    let udp_offset = 14 + ip_header_len as usize;
+                    let payload_offset = udp_offset + 8;
+                    
+                    if data.len() > payload_offset {
+                        let payload = data[payload_offset..].to_vec();
+                        return Ok(Some((payload, payload.len(), timestamp)));
+                    }
+                }
+                Ok(None)
+            }
+            Err(pcap::Error::TimeoutExpired) => Ok(None),
+            Err(e) => Err(anyhow::Error::from(e)),
+        }
+    }
+}
+
 #[derive(serde::Deserialize, serde::Serialize)]
 struct Config {
     ntp_server: String,
@@ -431,7 +483,7 @@ fn run_sync_loop(args: Args, running: Arc<AtomicBool>) -> Result<()> {
     info!("System clock control initialized.");
 
     // Network Interface Selection (Retry Loop)
-    let (_, iface_ip) = loop {
+    let (iface_name, iface_ip) = loop {
         match net::get_default_interface() {
             Ok(res) => break res,
             Err(e) => {
@@ -444,13 +496,22 @@ fn run_sync_loop(args: Args, running: Arc<AtomicBool>) -> Result<()> {
         }
     };
     
+    // Create sockets to join multicast groups (IGMP)
     let sock_event = net::create_multicast_socket(ptp::PTP_EVENT_PORT, iface_ip)?;
     let sock_general = net::create_multicast_socket(ptp::PTP_GENERAL_PORT, iface_ip)?;
-    info!("Listening on 224.0.1.129 ports 319/320 on {}", iface_ip);
+    info!("Joined Multicast Groups on {} ({})", iface_name, iface_ip);
 
+    #[cfg(unix)]
     let network = RealPtpNetwork {
         sock_event,
         sock_general,
+    };
+
+    #[cfg(windows)]
+    let network = {
+        // On Windows, use Pcap for kernel timestamps
+        info!("Opening Npcap capture on device: {}", iface_name);
+        PcapPtpNetwork::new(&iface_name)?
     };
     
     let ntp_source = RealNtpSource {
