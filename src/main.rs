@@ -432,17 +432,9 @@ fn run_sync_loop(args: Args, running: Arc<AtomicBool>) -> Result<()> {
     let sock_general = net::create_multicast_socket(ptp::PTP_GENERAL_PORT, iface_ip)?;
     info!("Joined Multicast Groups on {} ({})", iface_name, iface_ip);
 
-    #[cfg(unix)]
     let network = RealPtpNetwork {
         sock_event,
         sock_general,
-    };
-
-    #[cfg(windows)]
-    let network = {
-        // On Windows, use Pcap for kernel timestamps
-        info!("Opening Npcap capture on device: {}", iface_name);
-        PcapPtpNetwork::new(&iface_name)?
     };
     
     let ntp_source = RealNtpSource {
