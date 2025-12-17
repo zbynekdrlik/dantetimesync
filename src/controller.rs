@@ -303,6 +303,15 @@ where
                      
                      let step_duration = Duration::from_nanos(phase_offset_ns.abs() as u64);
                      let sign = if phase_offset_ns > 0 { -1 } else { 1 };
+                     
+                     if let Err(e) = self.clock.step_clock(step_duration, sign) {
+                         error!("Failed to step clock for drift correction: {}", e);
+                     } else {
+                         self.reset_filter();
+                         return;
+                     }
+                }
+            }
 
             // LUCKY PACKET FILTER LOGIC
             self.sample_window.push(phase_offset_ns);
