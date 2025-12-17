@@ -14,7 +14,7 @@ use crate::rtc;
 // Constants
 const MIN_DELTA_NS: i64 = 1_000_000;       // 1ms
 const MAX_DELTA_NS: i64 = 2_000_000_000;   // 2s
-const MAX_PHASE_OFFSET_FOR_STEP_NS: i64 = 10_000_000; // 10ms
+const MAX_PHASE_OFFSET_FOR_STEP_NS: i64 = 1_000_000; // 1ms (Reduced from 10ms to force tighter initial alignment)
 const RTC_UPDATE_INTERVAL: Duration = Duration::from_secs(600); // 10 minutes
 const SAMPLE_WINDOW_SIZE: usize = 4; // Reduced to 4 to speed up servo reaction
 
@@ -283,8 +283,8 @@ where
                 info!("Sync established. Updating RTC...");
                 self.update_rtc_now();
             } else {
-                // Check for massive drift while settled (> 500ms)
-                if phase_offset_ns.abs() > 500_000_000 {
+                // Check for massive drift while settled (> 2ms)
+                if phase_offset_ns.abs() > 2_000_000 {
                      warn!("Large offset {}ms detected while settled. Stepping clock (Servo Integral maintained).", phase_offset_ns / 1_000_000);
                      
                      let step_duration = Duration::from_nanos(phase_offset_ns.abs() as u64);

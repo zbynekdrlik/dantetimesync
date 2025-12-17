@@ -81,28 +81,24 @@ impl WindowsClock {
 }
 
 impl SystemClock for WindowsClock {
-    fn adjust_frequency(&mut self, factor: f64) -> Result<()> {
-        // Normalization for systems reporting 10M increment (1s) but running at 64Hz (15.6ms).
-        // If nominal is ~10M, and we apply factor directly, we get 64x gain.
-        // We scale the deviation by (156250 / nominal) to normalize to standard Windows tick.
-        
-        let ppm_part = factor - 1.0;
-        let scale = if self.nominal_frequency > 1_000_000 {
-            156250.0 / self.nominal_frequency as f64
-        } else {
-            1.0
-        };
-        
-        let effective_ppm = ppm_part * scale;
-        let effective_factor = 1.0 + effective_ppm;
+    fn adjust_frequency(&mut self, ppm: f64) -> Result<()> {
+        let adj_delta = (self.base_increment as f64 * ppm / 1_000_000.0) as i32;
+        let new_adj = (self.base_increment as i32 + adj_delta) as u32;
 
-        let new_adj = (self.nominal_frequency as f64 * effective_factor).round() as u64;
-        
         unsafe {
-            SetSystemTimeAdjustmentPrecise(new_adj, BOOL(0))?;
+            // Log the adjustment attempt for debugging
+            log::debug!("Adjusting frequency: PPM={:.3}, Base={}, NewAdj={}", ppm, self.base_increment, new_adj);
+
+            if SetSystemTimeAdjustment(new_adj, false).is_ok() {
+                Ok(())
+            } else {
+                let err = GetLastError();
+                log::error!("SetSystemTimeAdjustment failed! Error: {:?}", err);
+                Err(anyhow::anyhow!("SetSystemTimeAdjustment failed: {:?}", err))
+            }
         }
-        Ok(())
     }
+}
 
     fn step_clock(&mut self, offset: Duration, sign: i8) -> Result<()> {
         unsafe {
