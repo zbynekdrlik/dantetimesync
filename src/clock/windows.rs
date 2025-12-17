@@ -98,7 +98,8 @@ impl SystemClock for WindowsClock {
         // Calculate new adjustment based on nominal frequency (increment)
         // Adj = Inc + (Inc * ppm / 1e6)
         let adj_delta = (self.nominal_frequency as f64 * ppm / 1_000_000.0) as i64;
-        let new_adj = (self.nominal_frequency as i64 + adj_delta) as i64;
+        let val = self.nominal_frequency as i64 + adj_delta;
+        let new_adj = if val < 0 { 0 } else { val } as u64;
 
         unsafe {
             // Log the adjustment attempt for debugging
