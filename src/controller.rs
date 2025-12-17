@@ -283,9 +283,9 @@ where
                 info!("Sync established. Updating RTC...");
                 self.update_rtc_now();
             } else {
-                // Check for massive drift while settled (> 250us)
-                if phase_offset_ns.abs() > 250_000 {
-                     warn!("Large offset {}us detected while settled. Stepping clock (Servo Integral maintained).", phase_offset_ns / 1_000);
+                // Check for massive drift while settled (> 2ms)
+                if phase_offset_ns.abs() > 2_000_000 {
+                     warn!("Large offset {}ms detected while settled. Stepping clock (Servo Integral maintained).", phase_offset_ns / 1_000_000);
                      
                      let step_duration = Duration::from_nanos(phase_offset_ns.abs() as u64);
                      let sign = if phase_offset_ns > 0 { -1 } else { 1 };
