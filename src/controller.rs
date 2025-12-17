@@ -339,6 +339,11 @@ where
         self.prev_t1_ns = 0;
         self.prev_t2_ns = 0;
         self.sample_window.clear();
+        
+        if let Err(e) = self.network.reset() {
+            warn!("Failed to reset network buffers: {}", e);
+        }
+        
         self.update_shared_status();
     }
 }
