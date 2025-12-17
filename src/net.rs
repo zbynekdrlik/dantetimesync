@@ -25,24 +25,24 @@ pub fn get_default_interface() -> Result<(String, Ipv4Addr)> {
     for dev in valid_devices {
         // Find IPv4
         let ipv4 = dev.addresses.iter().find(|a| {
-            if let Some(socket_addr) = a.addr.as_socket_addr() {
-                socket_addr.is_ipv4() && !socket_addr.ip().is_loopback()
-            } else {
-                false
+            // pcap::Address.addr is std::net::IpAddr
+            match a.addr {
+                IpAddr::V4(ip) => !ip.is_loopback(),
+                _ => false,
             }
         });
 
         if let Some(ipv4_addr) = ipv4 {
-            let ip = if let std::net::SocketAddr::V4(addr) = ipv4_addr.addr.as_socket_addr().unwrap() {
-                *addr.ip()
+            let ip = if let IpAddr::V4(addr) = ipv4_addr.addr {
+                addr
             } else {
                 continue;
             };
 
-            // Prefer non-wireless/non-loopback (already filtered loopback).
-            // Pcap names are like \Device\NPF_{...}. Description has text.
-            let desc = dev.description.as_deref().unwrap_or("").to_lowercase();
-            let is_wireless = desc.contains("wireless") || desc.contains("wi-fi") || desc.contains("wlan");
+            // Prefer non-wireless/non-loopback
+            // pcap::Device has `desc` field (Option<String>)
+            let desc_str = dev.desc.as_deref().unwrap_or("").to_lowercase();
+            let is_wireless = desc_str.contains("wireless") || desc_str.contains("wi-fi") || desc_str.contains("wlan");
             
             if !is_wireless {
                 return Ok((dev.name.clone(), ip));
@@ -59,7 +59,7 @@ pub fn get_default_interface() -> Result<(String, Ipv4Addr)> {
     // Diagnostics
     log::warn!("No suitable IPv4 interface found. Diagnostics:");
     for dev in devices {
-        log::warn!(" - Name: {}, Desc: {:?}, Addrs: {:?}", dev.name, dev.description, dev.addresses);
+        log::warn!(" - Name: {}, Desc: {:?}, Addrs: {:?}", dev.name, dev.desc, dev.addresses);
     }
 
     Err(anyhow!("No suitable IPv4 interface found"))
