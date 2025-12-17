@@ -283,21 +283,12 @@ where
                 info!("Sync established. Updating RTC...");
                 self.update_rtc_now();
             } else {
-                // Check for massive drift while settled (> 2ms)
-                if phase_offset_ns.abs() > 2_000_000 {
+                // Check for massive drift while settled (> 10ms)
+                if phase_offset_ns.abs() > 10_000_000 {
                      warn!("Large offset {}ms detected while settled. Stepping clock (Servo Integral maintained).", phase_offset_ns / 1_000_000);
                      
                      let step_duration = Duration::from_nanos(phase_offset_ns.abs() as u64);
                      let sign = if phase_offset_ns > 0 { -1 } else { 1 };
-                     if let Err(e) = self.clock.step_clock(step_duration, sign) {
-                         error!("Failed to step clock: {}", e);
-                     }
-                     
-                     self.reset_filter();
-                     // Do NOT reset servo integral.
-                     return;
-                }
-            }
 
             // LUCKY PACKET FILTER LOGIC
             self.sample_window.push(phase_offset_ns);
