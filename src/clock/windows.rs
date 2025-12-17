@@ -97,24 +97,20 @@ impl SystemClock for WindowsClock {
     fn adjust_frequency(&mut self, ppm: f64) -> Result<()> {
         // Calculate new adjustment based on nominal frequency (increment)
         // Adj = Inc + (Inc * ppm / 1e6)
-        let adj_delta = (self.nominal_frequency as f64 * ppm / 1_000_000.0) as i32;
-        let new_adj = (self.nominal_frequency as i32 + adj_delta) as u32;
+        let adj_delta = (self.nominal_frequency as f64 * ppm / 1_000_000.0) as i64;
+        let new_adj = (self.nominal_frequency as i64 + adj_delta) as i64;
 
         unsafe {
             // Log the adjustment attempt for debugging
-            log::debug!("Adjusting frequency: PPM={:.3}, Base={}, NewAdj={}", ppm, self.nominal_frequency, new_adj);
+            log::debug!("Adjusting frequency (Precise): PPM={:.3}, Base={}, NewAdj={}", ppm, self.nominal_frequency, new_adj);
 
-            // Use legacy SetSystemTimeAdjustment because we are adjusting the "Periodic Tick".
-            // SetSystemTimeAdjustmentPrecise is for "Micro-adjustments" via QPC? 
-            // Documentation says SetSystemTimeAdjustment is valid.
-            // But we must cast to u32.
-            
-            if SetSystemTimeAdjustment(new_adj, false).is_ok() {
+            // Use Precise API
+            if SetSystemTimeAdjustmentPrecise(new_adj, false).is_ok() {
                 Ok(())
             } else {
                 let err = GetLastError();
-                log::error!("SetSystemTimeAdjustment failed! Error: {:?}", err);
-                Err(anyhow::anyhow!("SetSystemTimeAdjustment failed: {:?}", err))
+                log::error!("SetSystemTimeAdjustmentPrecise failed! Error: {:?}", err);
+                Err(anyhow::anyhow!("SetSystemTimeAdjustmentPrecise failed: {:?}", err))
             }
         }
     }
