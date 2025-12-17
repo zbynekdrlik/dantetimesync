@@ -114,11 +114,22 @@ impl PcapPtpNetwork {
     }
 
     fn open_capture(&mut self) -> Result<()> {
-        let mut cap = pcap::Capture::from_device(self.device_name.as_str())?
+        let mut cap_builder = pcap::Capture::from_device(self.device_name.as_str())?
             .promisc(true)
             .snaplen(2048)
-            .timeout(10) // ms
-            .open()?;
+            .timeout(10); // ms
+            
+        // Attempt to set timestamp type to Host (System Time) to support frequency slewing
+        // Ignore error if not supported (fallback to default)
+        let cap_builder = match cap_builder.tstamp_type(pcap::TstampType::Host) {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("Failed to set Pcap timestamp type to Host: {:?}", e);
+                cap_builder
+            }
+        };
+
+        let mut cap = cap_builder.open()?;
             
         cap.filter("udp port 319 or udp port 320", true)?;
         self.capture = Some(cap);
