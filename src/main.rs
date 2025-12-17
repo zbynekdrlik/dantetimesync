@@ -96,137 +96,6 @@ use traits::{NtpSource, PtpNetwork};
 use controller::PtpController;
 use status::SyncStatus;
 
-#[cfg(windows)]
-struct PcapPtpNetwork {
-    device_name: String,
-    capture: Option<pcap::Capture<pcap::Active>>,
-}
-
-#[cfg(windows)]
-impl PcapPtpNetwork {
-    fn new(device_name: &str) -> Result<Self> {
-        let mut net = Self {
-            device_name: device_name.to_string(),
-            capture: None,
-        };
-        net.open_capture()?;
-        Ok(net)
-    }
-
-    fn open_capture(&mut self) -> Result<()> {
-        let mut cap_builder = pcap::Capture::from_device(self.device_name.as_str())?
-            .promisc(true)
-            .snaplen(2048)
-            .timeout(10); // ms
-            
-        // Attempt to set timestamp type to Host (System Time) to support frequency slewing
-        // Ignore error if not supported (fallback to default)
-        let cap_builder = match cap_builder.tstamp_type(pcap::TstampType::Host) {
-            Ok(c) => c,
-            Err(e) => {
-                log::warn!("Failed to set Pcap timestamp type to Host: {:?}", e);
-                cap_builder
-            }
-        };
-
-        let mut cap = cap_builder.open()?;
-            
-        cap.filter("udp port 319 or udp port 320", true)?;
-        self.capture = Some(cap);
-        Ok(())
-    }
-}
-
-#[cfg(windows)]
-impl PtpNetwork for PcapPtpNetwork {
-    fn recv_packet(&mut self) -> Result<Option<(Vec<u8>, usize, SystemTime)>> {
-        let cap = self.capture.as_mut().ok_or_else(|| anyhow::anyhow!("Capture not initialized"))?;
-        
-        match cap.next_packet() {
-            Ok(packet) => {
-                let ts_sec = packet.header.ts.tv_sec as u64;
-                let ts_usec = packet.header.ts.tv_usec as u32;
-                let timestamp = SystemTime::UNIX_EPOCH + Duration::new(ts_sec, ts_usec * 1000);
-                
-                let data = packet.data;
-                // Basic IPv4 parsing (Ethernet 14 + IP 20 + UDP 8 = 42)
-                if data.len() < 42 { return Ok(None); }
-                
-                // EtherType 0x0800 (IPv4)
-                if data[12] == 0x08 && data[13] == 0x00 {
-                    let ip_header_len = (data[14] & 0x0F) * 4;
-                    let udp_offset = 14 + ip_header_len as usize;
-                    let payload_offset = udp_offset + 8;
-                    
-                    if data.len() > payload_offset {
-                        let payload = data[payload_offset..].to_vec();
-                        let len = payload.len();
-                        return Ok(Some((payload, len, timestamp)));
-                    }
-                }
-                Ok(None)
-            }
-            Err(pcap::Error::TimeoutExpired) => Ok(None),
-            Err(e) => Err(anyhow::Error::from(e)),
-        }
-    }
-
-    fn reset(&mut self) -> Result<()> {
-        log::info!("Resetting Pcap capture to clear buffers...");
-        self.capture = None;
-        self.open_capture()
-    }
-}
-
-#[cfg(unix)]
-struct RealPtpNetwork {
-    sock_event: UdpSocket,
-    sock_general: UdpSocket,
-}
-
-#[cfg(unix)]
-impl PtpNetwork for RealPtpNetwork {
-    fn recv_packet(&mut self) -> Result<Option<(Vec<u8>, usize, SystemTime)>> {
-        let mut buf = [0u8; 2048];
-        
-        // Check Event Port (319) first
-        match net::recv_with_timestamp(&self.sock_event, &mut buf) {
-            Ok(Some((size, ts))) => return Ok(Some((buf[..size].to_vec(), size, ts))),
-            Ok(None) => {}, // WouldBlock
-            Err(e) => return Err(anyhow::Error::from(e)),
-        }
-
-        // Check General Port (320)
-        match net::recv_with_timestamp(&self.sock_general, &mut buf) {
-            Ok(Some((size, ts))) => return Ok(Some((buf[..size].to_vec(), size, ts))),
-            Ok(None) => {},
-            Err(e) => return Err(anyhow::Error::from(e)),
-        }
-        
-        Ok(None)
-    }
-
-    fn reset(&mut self) -> Result<()> {
-        // Drain buffers to prevent processing old packets after a clock step
-        let mut buf = [0u8; 2048];
-        loop {
-            match self.sock_event.recv(&mut buf) {
-                Ok(_) => continue,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(_) => break,
-            }
-        }
-        loop {
-            match self.sock_general.recv(&mut buf) {
-                Ok(_) => continue,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(_) => break,
-            }
-        }
-        Ok(())
-    }
-}
-
 #[derive(serde::Deserialize, serde::Serialize)]
 struct Config {
     ntp_server: String,
@@ -283,6 +152,59 @@ struct RealNtpSource {
 impl NtpSource for RealNtpSource {
     fn get_offset(&self) -> Result<(Duration, i8)> {
         self.client.get_offset()
+    }
+}
+
+struct RealPtpNetwork {
+    sock_event: UdpSocket,
+    sock_general: UdpSocket,
+}
+
+impl PtpNetwork for RealPtpNetwork {
+    fn recv_packet(&mut self) -> Result<Option<(Vec<u8>, usize, SystemTime)>> {
+        let mut buf = [0u8; 2048];
+        
+        loop {
+            // Check Event Socket
+            match net::recv_with_timestamp(&self.sock_event, &mut buf) {
+                Ok(Some((size, ts))) => {
+                    return Ok(Some((buf[..size].to_vec(), size, ts)));
+                }
+                Ok(None) => {} // Continue to check general
+                Err(e) => return Err(e),
+            }
+
+            // Check General Socket
+            match net::recv_with_timestamp(&self.sock_general, &mut buf) {
+                Ok(Some((size, ts))) => {
+                    return Ok(Some((buf[..size].to_vec(), size, ts)));
+                }
+                Ok(None) => {} // Continue to next iteration
+                Err(e) => return Err(e),
+            }
+
+            return Ok(None);
+        }
+    }
+
+    fn reset(&mut self) -> Result<()> {
+        // Drain buffers to prevent processing old packets after a clock step
+        let mut buf = [0u8; 2048];
+        loop {
+            match self.sock_event.recv_from(&mut buf) {
+                Ok(_) => continue,
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
+                Err(_) => break,
+            }
+        }
+        loop {
+            match self.sock_general.recv_from(&mut buf) {
+                Ok(_) => continue,
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
+                Err(_) => break,
+            }
+        }
+        Ok(())
     }
 }
 
