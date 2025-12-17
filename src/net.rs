@@ -44,10 +44,13 @@ pub fn get_default_interface() -> Result<(String, Ipv4Addr)> {
             let desc_str = dev.desc.as_deref().unwrap_or("").to_lowercase();
             let is_wireless = desc_str.contains("wireless") || desc_str.contains("wi-fi") || desc_str.contains("wlan");
             
-            if !is_wireless {
-                return Ok((dev.name.clone(), ip));
-            } else if best_iface.is_none() {
-                best_iface = Some((dev.name.clone(), ip));
+            // Verify we can actually bind to this IP (WinSock check)
+            if is_ip_bindable(ip) {
+                if !is_wireless {
+                    return Ok((dev.name.clone(), ip));
+                } else if best_iface.is_none() {
+                    best_iface = Some((dev.name.clone(), ip));
+                }
             }
         }
     }
@@ -63,6 +66,15 @@ pub fn get_default_interface() -> Result<(String, Ipv4Addr)> {
     }
 
     Err(anyhow!("No suitable IPv4 interface found"))
+}
+
+fn is_ip_bindable(ip: Ipv4Addr) -> bool {
+    let socket = match Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let addr = SocketAddrV4::new(ip, 0); // Port 0 (ephemeral)
+    socket.bind(&addr.into()).is_ok()
 }
 
 pub fn create_multicast_socket(port: u16, interface_ip: Ipv4Addr) -> Result<UdpSocket> {
