@@ -441,7 +441,7 @@ mod tests {
             .returning(|| Ok(None));
 
         mock_clock.expect_adjust_frequency()
-            .times(1) 
+            .times(2) 
             .returning(|_| Ok(()));
 
         let status = Arc::new(RwLock::new(SyncStatus::default()));
