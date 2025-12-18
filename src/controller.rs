@@ -353,10 +353,14 @@ where
 
             // LUCKY PACKET FILTER LOGIC
             self.sample_window.push(phase_offset_ns);
-            
+
             if self.sample_window.len() >= self.config.filters.sample_window_size {
-                if let Some(&lucky_offset) = self.sample_window.iter().min() {
-                    
+                // Select the offset with minimum absolute value.
+                // This handles second-boundary crossing artifacts where measurements
+                // can flip between e.g. +300ms and -700ms due to T1/T2 crossing
+                // different second boundaries.
+                if let Some(&lucky_offset) = self.sample_window.iter().min_by_key(|&&x| x.abs()) {
+
                     self.last_phase_offset_ns = lucky_offset;
                     
                     let adj_ppm = self.servo.sample(lucky_offset);
