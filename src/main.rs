@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use log::{info, warn, error};
 use std::sync::atomic::{AtomicBool, Ordering};
