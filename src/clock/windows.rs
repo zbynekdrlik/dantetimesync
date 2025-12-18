@@ -112,6 +112,16 @@ impl SystemClock for WindowsClock {
                 error!("SetSystemTimeAdjustmentPrecise failed: {}", e);
                 return Err(anyhow!("SetSystemTimeAdjustmentPrecise failed: {}", e));
             }
+
+            // Verify the adjustment was actually applied
+            let mut verify_adj = 0u64;
+            let mut verify_inc = 0u64;
+            let mut verify_disabled = BOOL(0);
+            if GetSystemTimeAdjustmentPrecise(&mut verify_adj, &mut verify_inc, &mut verify_disabled).is_ok() {
+                if verify_adj != new_adj {
+                    warn!("Adjustment mismatch! Requested={}, Actual={}", new_adj, verify_adj);
+                }
+            }
         }
         Ok(())
     }
