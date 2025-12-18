@@ -1,18 +1,19 @@
 #!/bin/bash
 set -e
 
-echo ">>> Dante Time Sync Installer <<<"
+VERSION="1.1.72"
+
+if [ "$1" == "--version" ]; then
+    echo "Dante Time Sync Installer v$VERSION"
+    exit 0
+fi
+
+echo ">>> Dante Time Sync Installer v$VERSION <<<"
 
 if [ "$EUID" -ne 0 ]; then
   echo "Error: Please run as root (sudo ./install.sh)"
   exit 1
 fi
-
-# 1. Install System Dependencies
-echo ">>> Installing system dependencies..."
-apt-get update
-# util-linux provides hwclock (if available on platform)
-apt-get install -y build-essential curl util-linux
 
 # 1. Install System Dependencies
 echo ">>> Installing system dependencies..."
@@ -55,27 +56,7 @@ if [ "$SKIP_BUILD" = false ]; then
     fi
 
     echo ">>> Building dantetimesync from source..."
-    # Ensure cargo is in path
     export PATH="$HOME/.cargo/bin:/root/.cargo/bin:$PATH"
-    
-    # We assume the script is run inside the repo or we need to clone it?
-    # The curl | bash usage assumes we are NOT in the repo usually?
-    # Wait! "curl ... | bash" runs the script content.
-    # The script says "cargo build --release".
-    # This assumes the Current Working Directory IS the repo.
-    # But "curl ... | bash" runs in whatever dir the user is in.
-    # If the user runs it from /home/user, "cargo build" fails because no Cargo.toml.
-    
-    # The WINDOWS installer downloads the EXE.
-    # The LINUX installer (as written previously) assumed user cloned the repo?
-    # My instructions were: "git clone ... cd ... sudo ./install.sh".
-    # So CWD is repo.
-    
-    # BUT, if the user wants "curl | bash" ONE LINER without cloning?
-    # Then I MUST clone inside the script if I need to build.
-    # OR the download method is the ONLY way for "curl | bash" without clone.
-    
-    # If I want to support "curl | bash" for Source Build, I must git clone to temp dir.
     
     if [ ! -f "Cargo.toml" ]; then
         echo ">>> Cargo.toml not found. Cloning repository to build..."
@@ -99,7 +80,6 @@ mkdir -p /etc/dantetimesync
 
 # 5. Disable Conflicting Services
 echo ">>> Disabling conflicting time services..."
-# We disable these to prevent them from fighting for the clock
 systemctl stop systemd-timesyncd 2>/dev/null || true
 systemctl disable systemd-timesyncd 2>/dev/null || true
 systemctl stop chrony 2>/dev/null || true
@@ -111,7 +91,7 @@ systemctl disable ntp 2>/dev/null || true
 echo ">>> Creating systemd service..."
 cat <<EOF > /etc/systemd/system/dantetimesync.service
 [Unit]
-Description=Dante PTP Time Sync Service
+Description=Dante PTP Time Sync Service v$VERSION
 After=network-online.target
 Wants=network-online.target
 
@@ -122,7 +102,7 @@ Group=root
 ExecStart=/usr/local/bin/dantetimesync
 Restart=always
 RestartSec=5
-# High priority for timestamping accuracy (Redundant with internal code but good practice)
+# High priority for timestamping accuracy
 CPUSchedulingPolicy=fifo
 CPUSchedulingPriority=50
 
@@ -135,6 +115,11 @@ echo ">>> Starting service..."
 systemctl daemon-reload
 systemctl enable dantetimesync
 systemctl restart dantetimesync
+
+# 8. Final Verification
+echo ">>> Verifying installation..."
+INSTALLED_VERSION=$(/usr/local/bin/dantetimesync --version)
+echo ">>> Installed: $INSTALLED_VERSION"
 
 echo ">>> Installation Complete!"
 echo ">>> Check status with: systemctl status dantetimesync"
