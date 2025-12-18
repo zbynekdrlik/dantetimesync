@@ -188,14 +188,19 @@ fn run_simulation(
 
 #[test]
 fn test_linux_stability_low_jitter() {
-    let mut config = SystemConfig::default(); 
+    let mut config = SystemConfig::default();
+    // Explicitly set all Linux-like config values to ensure consistent test across platforms
     config.servo.kp = 0.0005;
     config.servo.ki = 0.00005;
+    config.servo.max_freq_adj_ppm = 500.0; // Linux-like tight adjustment
+    config.servo.max_integral_ppm = 100.0;
     config.filters.step_threshold_ns = 5_000_000;
-    
+    config.filters.sample_window_size = 4; // Small window for low-jitter environment
+    config.filters.calibration_samples = 0;
+
     // 50us jitter, 50ppm drift
     let (final_off, max_off) = run_simulation(config, 50_000.0, 50.0, 100);
-    
+
     println!("Linux Stable: Final {:.3}us, Max {:.3}us", final_off/1000.0, max_off/1000.0);
     assert!(final_off < 500_000.0, "Final offset too high");
 }

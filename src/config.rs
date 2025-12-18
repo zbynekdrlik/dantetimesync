@@ -37,9 +37,9 @@ impl Default for SystemConfig {
                     max_integral_ppm: 5_000.0,
                 },
                 filters: FilterConfig {
-                    step_threshold_ns: 150_000_000, // 150ms - Windows timestamps have high jitter
-                    panic_threshold_ns: 500_000_000, // 500ms
-                    sample_window_size: 16, // Larger window to filter Windows jitter
+                    step_threshold_ns: 250_000_000, // 250ms - Windows timestamps have extreme jitter
+                    panic_threshold_ns: 1_000_000_000, // 1s - initial alignment threshold
+                    sample_window_size: 32, // Larger window to filter Windows jitter spikes
                     min_delta_ns: 0,
                     // Calibration disabled: we use SystemTime::now() which measures the actual
                     // system clock. Calibration would subtract the real offset, hiding it from servo.
