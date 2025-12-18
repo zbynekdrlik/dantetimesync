@@ -153,8 +153,10 @@ impl SystemClock for WindowsClock {
 impl Drop for WindowsClock {
     fn drop(&mut self) {
         unsafe {
-            // Restore original settings
-            let _ = SetSystemTimeAdjustmentPrecise(self.original_adjustment, self.original_disabled);
+            // On exit, set clock to run at 1x speed using the corrected nominal frequency
+            // DO NOT restore the original (potentially broken) HAL settings
+            // This ensures the system clock runs correctly even after the service stops
+            let _ = SetSystemTimeAdjustmentPrecise(self.nominal_frequency, false);
         }
     }
 }

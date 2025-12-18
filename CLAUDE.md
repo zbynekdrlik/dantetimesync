@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Act as senior Rust, Windows, hardware, and clock-skilled developer
 - Use TDD approach and ensure all code has test coverage
+- **Test Quality:** All code must have 100% test coverage with high-quality, complex E2E tests. Never put out a broken version. The `tests/simulation_e2e.rs` contains critical simulation tests that validate the servo and controller behavior under various conditions.
 - **Local Verification:** Prioritize local `cargo build`, `cargo test`, and running the binary locally to verify changes before pushing to GitHub or deploying remotely
 - **CI/CD Verification:** Wait until GitHub Actions CI/CD pipeline has successfully finished (green checkmark) before telling the user to update or run commands. Monitor `gh run view` until completion
 - **Autonomous Deployment:** Install and verify updates on remote machines (Windows/Linux) listed in `TARGETS.md` using available tools (SSH, etc.)
