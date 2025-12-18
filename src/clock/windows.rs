@@ -57,18 +57,19 @@ impl WindowsClock {
         info!("Windows Clock Initial State: Adj={}, Inc={}, Disabled={}", adj, inc, disabled.as_bool());
 
         // Sanity check: If Inc is unreasonably large (e.g., 10,000,000 = 1s), it implies 
-        // the OS reports a value inconsistent with the actual interrupt rate (typically 64Hz/15.6ms).
-        // Using 1s Inc with 64Hz interrupts causes 64x time acceleration.
-        if inc > 200_000 {
-            log::warn!("Reported Time Increment {} is too large (>20ms). Suspect timer mismatch. Forcing standard 156,250 (15.625ms).", inc);
-            inc = 156_250;
-        }
+        // the OS reports a value inconsistent with the actual interrupt rate.
+        // Since we explicitly call timeBeginPeriod(1) in main.rs, we force the kernel timer to ~1ms (1kHz).
+        // Therefore, the increment MUST be 10,000 (1ms in 100ns units) to maintain 1:1 time flow.
+        // Using 156,250 (15.6ms) with 1ms interrupts caused ~15x speedup.
+        
+        let effective_inc = 10_000; // 1ms
+        log::info!("Forcing nominal frequency to {} (1ms) to match timeBeginPeriod(1). Reported was: {}", effective_inc, inc);
 
         Ok(WindowsClock {
             original_adjustment: adj,
             original_increment: inc,
             original_disabled: disabled,
-            nominal_frequency: inc, 
+            nominal_frequency: effective_inc, 
         })
     }
 
