@@ -222,7 +222,8 @@ pub fn recv_pcap_packet(cap: &mut Capture<Active>) -> Result<Option<(Vec<u8>, us
     match cap.next_packet() {
         Ok(packet) => {
             let ts = &packet.header.ts;
-            if let Some(result) = parse_ptp_from_pcap(packet.data, ts.tv_sec, ts.tv_usec as i64) {
+            // tv_sec is i32 on Windows, i64 on Linux - use Into to handle both
+            if let Some(result) = parse_ptp_from_pcap(packet.data, ts.tv_sec.into(), ts.tv_usec as i64) {
                 Ok(Some(result))
             } else {
                 Ok(None)
