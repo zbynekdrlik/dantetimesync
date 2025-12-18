@@ -8,24 +8,12 @@ use crate::traits::{NtpSource, PtpNetwork};
 use crate::ptp::{PtpV1Header, PtpV1Control, PtpV1FollowUpBody, PtpV1SyncMessageBody};
 use crate::servo::PiServo;
 use crate::status::SyncStatus;
+use crate::config::SystemConfig;
 #[cfg(unix)]
 use crate::rtc;
 
-// Constants
-#[cfg(windows)]
-const MIN_DELTA_NS: i64 = 0;               // Allow 0ms (bursts/quantization) on Windows
-#[cfg(not(windows))]
-const MIN_DELTA_NS: i64 = 1_000_000;       // 1ms on Linux
-
-#[cfg(windows)]
-const MASSIVE_DRIFT_THRESHOLD_NS: i64 = 10_000_000; // 10ms on Windows (High Jitter/Drift)
-#[cfg(not(windows))]
-const MASSIVE_DRIFT_THRESHOLD_NS: i64 = 5_000_000;    // 5ms on Linux (Allow capture of high drift)
-
-const MAX_DELTA_NS: i64 = 2_000_000_000;   // 2s
-const MAX_PHASE_OFFSET_FOR_STEP_NS: i64 = 10_000_000; // 10ms (Initial alignment)
+const MAX_DELTA_NS: i64 = 2_000_000_000;   // 2s (Hard safety limit)
 const RTC_UPDATE_INTERVAL: Duration = Duration::from_secs(600); // 10 minutes
-const SAMPLE_WINDOW_SIZE: usize = 4; // Reduced to 4 to speed up servo reaction
 
 pub struct PtpController<C, N, S> 
 where 
@@ -37,6 +25,7 @@ where
     network: N,
     ntp: S,
     servo: PiServo,
+    config: SystemConfig,
     
     // State
     pending_syncs: HashMap<u16, PendingSync>,
@@ -77,22 +66,21 @@ where
     N: PtpNetwork,
     S: NtpSource
 {
-    pub fn new(clock: C, network: N, ntp: S, status_shared: Arc<RwLock<SyncStatus>>) -> Self {
-        #[cfg(windows)]
-        let servo = PiServo::new(0.1, 0.001); // Aggressive for Windows VM
-        #[cfg(not(windows))]
-        let servo = PiServo::new(0.0005, 0.00005); // Standard for Linux
+    pub fn new(clock: C, network: N, ntp: S, status_shared: Arc<RwLock<SyncStatus>>, config: SystemConfig) -> Self {
+        let servo = PiServo::new(config.servo.clone());
+        let window_size = config.filters.sample_window_size;
 
         PtpController {
             clock,
             network,
             ntp,
             servo,
+            config,
             pending_syncs: HashMap::new(),
             prev_t1_ns: 0,
             prev_t2_ns: 0,
             current_gm_uuid: None,
-            sample_window: Vec::with_capacity(SAMPLE_WINDOW_SIZE),
+            sample_window: Vec::with_capacity(window_size),
             last_phase_offset_ns: 0,
             last_adj_ppm: 0.0,
             initial_epoch_offset_ns: 0,
@@ -264,8 +252,8 @@ where
             let delta_master = t1_ns - self.prev_t1_ns;
             let delta_slave = t2_ns - self.prev_t2_ns;
             
-            if delta_master < MIN_DELTA_NS || delta_master > MAX_DELTA_NS ||
-               delta_slave < MIN_DELTA_NS || delta_slave > MAX_DELTA_NS {
+            if delta_master < self.config.filters.min_delta_ns || delta_master > MAX_DELTA_NS ||
+               delta_slave < self.config.filters.min_delta_ns || delta_slave > MAX_DELTA_NS {
                 warn!("Delta out of range. Skipping. Master={}ns, Slave={}ns", delta_master, delta_slave);
                 self.prev_t1_ns = t1_ns;
                 self.prev_t2_ns = t2_ns;
@@ -280,7 +268,7 @@ where
                 self.initial_epoch_offset_ns = t2_ns - t1_ns;
                 self.epoch_aligned = true;
 
-                if phase_offset_ns.abs() > MAX_PHASE_OFFSET_FOR_STEP_NS {
+                if phase_offset_ns.abs() > self.config.filters.panic_threshold_ns {
                     info!("Initial Phase Offset {}ms is large. Stepping clock to align phase...", phase_offset_ns / 1_000_000);
                     let step_duration = Duration::from_nanos(phase_offset_ns.abs() as u64);
                     let sign = if phase_offset_ns > 0 { -1 } else { 1 };
@@ -298,7 +286,7 @@ where
                 self.update_rtc_now();
             } else {
                 // Check for massive drift while settled
-                if phase_offset_ns.abs() > MASSIVE_DRIFT_THRESHOLD_NS {
+                if phase_offset_ns.abs() > self.config.filters.step_threshold_ns {
                      warn!("Large offset {}us detected while settled. Stepping clock (Servo Integral maintained).", phase_offset_ns / 1_000);
                      
                      let step_duration = Duration::from_nanos(phase_offset_ns.abs() as u64);
@@ -316,7 +304,7 @@ where
             // LUCKY PACKET FILTER LOGIC
             self.sample_window.push(phase_offset_ns);
             
-            if self.sample_window.len() >= SAMPLE_WINDOW_SIZE {
+            if self.sample_window.len() >= self.config.filters.sample_window_size {
                 if let Some(&lucky_offset) = self.sample_window.iter().min() {
                     
                     self.last_phase_offset_ns = lucky_offset;
@@ -386,7 +374,7 @@ mod tests {
             .returning(|_, _| Ok(()));
 
         let status = Arc::new(RwLock::new(SyncStatus::default()));
-        let mut controller = PtpController::new(mock_clock, mock_net, mock_ntp, status);
+        let mut controller = PtpController::new(mock_clock, mock_net, mock_ntp, status, SystemConfig::default());
         controller.run_ntp_sync(false);
     }
 
@@ -464,7 +452,7 @@ mod tests {
             .returning(|_| Ok(()));
 
         let status = Arc::new(RwLock::new(SyncStatus::default()));
-        let mut controller = PtpController::new(mock_clock, mock_net, mock_ntp, status);
+        let mut controller = PtpController::new(mock_clock, mock_net, mock_ntp, status, SystemConfig::default());
         
         // Process 16 packets (8 Sync + 8 FollowUp)
         for _ in 0..16 {

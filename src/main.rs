@@ -81,30 +81,27 @@ use windows_service::
         service_dispatcher,
     };
 
-mod ptp;
-mod net;
-mod clock;
-mod ntp;
-mod traits;
-mod controller;
-mod servo;
-mod status;
+// Use library crate modules
+use dantetimesync::{ptp, net, clock, ntp, traits, controller, status, config};
 #[cfg(unix)]
-mod rtc;
+use dantetimesync::rtc;
 
 use traits::{NtpSource, PtpNetwork};
 use controller::PtpController;
 use status::SyncStatus;
+use config::SystemConfig;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct Config {
     ntp_server: String,
+    system: SystemConfig,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             ntp_server: "10.77.8.2".to_string(),
+            system: SystemConfig::default(),
         }
     }
 }
@@ -388,7 +385,7 @@ fn start_ipc_server(_status: Arc<RwLock<SyncStatus>>) {
 }
 
 // --- Sync Loop ---
-fn run_sync_loop(args: Args, running: Arc<AtomicBool>) -> Result<()> {
+fn run_sync_loop(args: Args, running: Arc<AtomicBool>, system_config: SystemConfig) -> Result<()> {
     // Notify systemd (Linux) that we are starting
     #[cfg(unix)]
     {
@@ -441,7 +438,7 @@ fn run_sync_loop(args: Args, running: Arc<AtomicBool>) -> Result<()> {
         client: ntp::NtpClient::new(&args.ntp_server),
     };
 
-    let mut controller = PtpController::new(sys_clock, network, ntp_source, status_shared);
+    let mut controller = PtpController::new(sys_clock, network, ntp_source, status_shared, system_config);
     
     if !args.skip_ntp {
         info!("Using NTP Server: {}", args.ntp_server);
@@ -505,10 +502,15 @@ const SERVICE_NAME: &str = "dantetimesync";
 const SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
 
 #[cfg(windows)]
-fn run_service_logic(_args: Args) -> Result<()> {
+fn run_service_logic(args: Args, config: Config) -> Result<()> {
     define_windows_service!(ffi_service_main, my_service_main);
 
     fn my_service_main(_arguments: Vec<OsString>) {
+        // We need to reload config or pass it? 
+        // Windows Service entry doesn't allow easy closure capture without unsafe global.
+        // But we can just reload it, it's cheap.
+        let config = load_config();
+        
         let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel();
 
         let event_handler = move |control_event| -> ServiceControlHandlerResult {
@@ -546,7 +548,7 @@ fn run_service_logic(_args: Args) -> Result<()> {
         
         // Spawn the sync loop in a thread
         let handle = thread::spawn(move || {
-            if let Err(e) = run_sync_loop(args, r) {
+            if let Err(e) = run_sync_loop(args, r, config.system) {
                 error!("Service loop failed: {}", e);
             }
         });
@@ -579,7 +581,7 @@ fn main() -> Result<()> {
 
     // Use config if arg is default
     if args.ntp_server == "10.77.8.2" {
-        args.ntp_server = config.ntp_server;
+        args.ntp_server = config.ntp_server.clone();
     }
 
     #[cfg(windows)]
@@ -608,7 +610,7 @@ fn main() -> Result<()> {
         }
         
         info!("Service Started: v{}", env!("CARGO_PKG_VERSION"));
-        return run_service_logic(args);
+        return run_service_logic(args, config);
     }
 
     // Console Mode Logging
@@ -637,5 +639,5 @@ fn main() -> Result<()> {
         r.store(false, Ordering::SeqCst);
     })?;
 
-    run_sync_loop(args, running)
+    run_sync_loop(args, running, config.system)
 }

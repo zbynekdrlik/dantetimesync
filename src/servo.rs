@@ -1,22 +1,16 @@
 use log::debug;
+use crate::config::ServoConfig;
 
 pub struct PiServo {
-    kp: f64,
-    ki: f64,
+    config: ServoConfig,
     integral: f64,
-    max_integral: f64,
 }
 
 impl PiServo {
-    pub fn new(kp: f64, ki: f64) -> Self {
+    pub fn new(config: ServoConfig) -> Self {
         PiServo {
-            kp,
-            ki,
+            config,
             integral: 0.0,
-            #[cfg(windows)]
-            max_integral: 15000.0,
-            #[cfg(not(windows))]
-            max_integral: 200.0, 
         }
     }
 
@@ -34,22 +28,19 @@ impl PiServo {
         let error = -offset_ns as f64; 
 
         // Update Integral
-        self.integral += error * self.ki;
+        self.integral += error * self.config.ki;
         
         // Clamp integral
-        if self.integral > self.max_integral { self.integral = self.max_integral; }
-        if self.integral < -self.max_integral { self.integral = -self.max_integral; }
+        if self.integral > self.config.max_integral_ppm { self.integral = self.config.max_integral_ppm; }
+        if self.integral < -self.config.max_integral_ppm { self.integral = -self.config.max_integral_ppm; }
 
         // Proportional
-        let proportional = error * self.kp;
+        let proportional = error * self.config.kp;
 
         let adjustment_ppm = proportional + self.integral;
         
-        // Clamp total adjustment to reasonable limits.
-        // On systems with 10M increment (64x gain), we divide the input by 64.
-        // To achieve 3% effective correction (30,000 ppm), we need 30,000 * 64 = 1,920,000 ppm input.
-        // We allow up to 2,000,000 ppm (200%).
-        let max_adj = 2000000.0;
+        // Clamp total adjustment
+        let max_adj = self.config.max_freq_adj_ppm;
         let final_adj = if adjustment_ppm > max_adj { 
             max_adj 
         } else if adjustment_ppm < -max_adj { 
@@ -68,11 +59,21 @@ impl PiServo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ServoConfig;
+
+    fn get_test_config(kp: f64, ki: f64) -> ServoConfig {
+        ServoConfig {
+            kp,
+            ki,
+            max_freq_adj_ppm: 2_000_000.0,
+            max_integral_ppm: 15_000.0,
+        }
+    }
 
     #[test]
     fn test_servo_proportional() {
         // Zero Ki, purely Proportional
-        let mut servo = PiServo::new(0.001, 0.0);
+        let mut servo = PiServo::new(get_test_config(0.001, 0.0));
         
         // Offset 1000ns (ahead) -> Error -1000 -> Adj -1.0 ppm
         let adj = servo.sample(1000);
@@ -81,7 +82,7 @@ mod tests {
 
     #[test]
     fn test_servo_output_clamping() {
-        let mut servo = PiServo::new(1.0, 0.0); // High Kp
+        let mut servo = PiServo::new(get_test_config(1.0, 0.0)); // High Kp
         
         // Huge offset: 1s = 1,000,000,000ns.
         // P = -1e9.
@@ -92,7 +93,7 @@ mod tests {
 
     #[test]
     fn test_servo_integral_accumulation() {
-        let mut servo = PiServo::new(0.0, 0.001); // Pure Integral
+        let mut servo = PiServo::new(get_test_config(0.0, 0.001)); // Pure Integral
         
         // Error -1000. I += -1.0. Adj -1.0
         let adj1 = servo.sample(1000);
@@ -105,7 +106,7 @@ mod tests {
 
     #[test]
     fn test_servo_reset() {
-        let mut servo = PiServo::new(0.0, 0.001);
+        let mut servo = PiServo::new(get_test_config(0.0, 0.001));
         servo.sample(1000); // I = -1.0
         assert!(servo.integral.abs() > 0.0);
         
@@ -118,19 +119,16 @@ mod tests {
 
     #[test]
     fn test_servo_integral_clamping() {
-        let mut servo = PiServo::new(0.0, 1.0); // High Ki
+        let mut config = get_test_config(0.0, 1.0);
+        config.max_integral_ppm = 200.0;
+        let mut servo = PiServo::new(config); 
         
-        #[cfg(windows)]
-        let max = 15000.0;
-        #[cfg(not(windows))]
-        let max = 200.0;
-
         // Huge error to trigger clamp
         servo.sample(-20000); 
         
-        assert!((servo.integral - max).abs() < 0.0001);
+        assert!((servo.integral - 200.0).abs() < 0.0001);
         
         let adj = servo.sample(0); 
-        assert!((adj - max).abs() < 0.0001);
+        assert!((adj - 200.0).abs() < 0.0001);
     }
 }
