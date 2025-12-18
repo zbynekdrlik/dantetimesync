@@ -221,10 +221,11 @@ pub fn parse_ptp_from_pcap(data: &[u8], ts_sec: i64, ts_usec: i64) -> Option<(Ve
 pub fn recv_pcap_packet(cap: &mut Capture<Active>) -> Result<Option<(Vec<u8>, usize, SystemTime)>> {
     match cap.next_packet() {
         Ok(packet) => {
-            let ts = &packet.header.ts;
-            // tv_sec is i32 on Windows, i64 on Linux - use Into to handle both
-            if let Some(result) = parse_ptp_from_pcap(packet.data, ts.tv_sec.into(), ts.tv_usec as i64) {
-                Ok(Some(result))
+            // Capture SystemTime immediately when packet arrives
+            // Pcap timestamps on Windows have systematic offset issues
+            let timestamp = SystemTime::now();
+            if let Some((payload, size, _pcap_ts)) = parse_ptp_from_pcap(packet.data, 0, 0) {
+                Ok(Some((payload, size, timestamp)))
             } else {
                 Ok(None)
             }

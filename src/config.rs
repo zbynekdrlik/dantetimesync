@@ -31,10 +31,10 @@ impl Default for SystemConfig {
                     kp: 0.005, // Reduced from 0.1 to prevent oscillation (8Hz limit ~0.008)
                     ki: 0.0005,
                     max_freq_adj_ppm: 500_000.0,
-                    max_integral_ppm: 100_000.0, 
+                    max_integral_ppm: 100_000.0,
                 },
                 filters: FilterConfig {
-                    step_threshold_ns: 50_000_000, // 50ms (Very relaxed for Windows)
+                    step_threshold_ns: 100_000_000, // 100ms - relaxed for Windows timing jitter
                     panic_threshold_ns: 500_000_000, // 500ms
                     sample_window_size: 8, // Increase window to filter jitter
                     min_delta_ns: 0,
