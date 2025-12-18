@@ -7,13 +7,13 @@ use windows::Win32::Security::{
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::System::SystemInformation::{
-    GetSystemTimeAdjustmentPrecise, SetSystemTimeAdjustmentPrecise, SetSystemTimeAdjustment,
+    GetSystemTimeAdjustmentPrecise, SetSystemTimeAdjustmentPrecise,
     GetSystemTimeAsFileTime, SetSystemTime
 };
 use windows::Win32::System::Time::FileTimeToSystemTime;
 use windows::core::PCWSTR;
 use std::time::Duration;
-use log::info;
+use log::{info, warn, debug, error};
 
 pub struct WindowsClock {
     original_adjustment: u64,
@@ -26,42 +26,31 @@ impl WindowsClock {
     pub fn new() -> Result<Self> {
         Self::enable_privilege("SeSystemtimePrivilege")?;
 
-        // Reset any existing adjustments
-        unsafe {
-            // Try to disable Precise first (if available) - ignore errors
-            let _ = SetSystemTimeAdjustmentPrecise(0, true);
-            // Disable Legacy
-            let _ = SetSystemTimeAdjustment(0, true);
-        }
-
-        // Use Precise API to READ the state (it gives u64 precision)
         let mut adj = 0u64;
         let mut inc = 0u64;
         let mut disabled = BOOL(0);
 
         unsafe {
             if let Err(e) = GetSystemTimeAdjustmentPrecise(&mut adj, &mut inc, &mut disabled) {
-                log::warn!("GetSystemTimeAdjustmentPrecise failed, trying legacy. Error: {}", e);
-                return Err(anyhow!("GetSystemTimeAdjustmentPrecise failed (Win10+ required): {}", e));
+                error!("GetSystemTimeAdjustmentPrecise failed: {}", e);
+                return Err(anyhow!("GetSystemTimeAdjustmentPrecise failed: {}", e));
             }
         }
         
         info!("Windows Clock Initial State: Adj={}, Inc={}, Disabled={}", adj, inc, disabled.as_bool());
 
-        // Sanity check: If Inc is unreasonably large (e.g., 10,000,000 = 1s), it implies 
-        // the OS reports a value inconsistent with the actual interrupt rate (typically 64Hz/15.6ms).
-        // Using 1s Inc with 64Hz interrupts causes 64x time acceleration.
-        // We force standard 156,250 (15.625ms) if detected.
+        // Sanity check for "Broken HAL" (Reporting 1s instead of 15.6ms)
+        let mut nominal = inc;
         if inc > 200_000 {
-            log::warn!("Reported Time Increment {} is too large (>20ms). Suspect timer mismatch. Forcing standard 156,250 (15.625ms).", inc);
-            inc = 156_250;
+            warn!("Reported Time Increment {} is too large (>20ms). Suspect timer mismatch (64Hz vs 1Hz). Forcing standard 156,250 (15.625ms).", inc);
+            nominal = 156_250;
         }
 
         Ok(WindowsClock {
             original_adjustment: adj,
             original_increment: inc,
             original_disabled: disabled,
-            nominal_frequency: inc, 
+            nominal_frequency: nominal, 
         })
     }
 
@@ -97,27 +86,20 @@ impl WindowsClock {
 
 impl SystemClock for WindowsClock {
     fn adjust_frequency(&mut self, ppm: f64) -> Result<()> {
-        // Calculate new adjustment based on nominal frequency (increment)
-        // Adj = Inc + (Inc * ppm / 1e6)
-        let adj_delta = (self.nominal_frequency as f64 * ppm / 1_000_000.0) as i32;
-        let val = self.nominal_frequency as i32 + adj_delta;
-        // Clamp to u32 range and ensure positive
-        let new_adj = if val < 0 { 0 } else { val } as u32;
+        // Calculate new adjustment based on nominal frequency
+        // Adj = Nominal * (1 + ppm/1e6)
+        let adj_f = self.nominal_frequency as f64 * (1.0 + ppm / 1_000_000.0);
+        let new_adj = adj_f.round() as u64;
 
         unsafe {
-            // Log the adjustment attempt for debugging
-            log::debug!("Adjusting frequency (Legacy): PPM={:.3}, Base={}, NewAdj={}", ppm, self.nominal_frequency, new_adj);
+            debug!("Adjusting frequency (Precise): PPM={:.3}, Base={}, NewAdj={}", ppm, self.nominal_frequency, new_adj);
 
-            // Legacy API: SetSystemTimeAdjustment takes u32
-            // We use this instead of Precise API to avoid 1000x speedup issues on broken HALs
-            if SetSystemTimeAdjustment(new_adj, false).is_ok() {
-                Ok(())
-            } else {
-                let err = GetLastError();
-                log::error!("SetSystemTimeAdjustment failed! Error: {:?}", err);
-                Err(anyhow::anyhow!("SetSystemTimeAdjustment failed: {:?}", err))
+            if let Err(e) = SetSystemTimeAdjustmentPrecise(new_adj, false) {
+                error!("SetSystemTimeAdjustmentPrecise failed: {}", e);
+                return Err(anyhow!("SetSystemTimeAdjustmentPrecise failed: {}", e));
             }
         }
+        Ok(())
     }
 
     fn step_clock(&mut self, offset: Duration, sign: i8) -> Result<()> {
@@ -143,8 +125,12 @@ impl SystemClock for WindowsClock {
             };
             
             let mut st = SYSTEMTIME::default();
-            FileTimeToSystemTime(&ft_new, &mut st)?;
-            SetSystemTime(&st)?;
+            if let Err(e) = FileTimeToSystemTime(&ft_new, &mut st) {
+                 return Err(anyhow!("FileTimeToSystemTime failed: {}", e));
+            }
+            if let Err(e) = SetSystemTime(&st) {
+                 return Err(anyhow!("SetSystemTime failed: {}", e));
+            }
         }
 
         Ok(())
@@ -155,7 +141,6 @@ impl Drop for WindowsClock {
     fn drop(&mut self) {
         unsafe {
             // Restore original settings
-            // We use Precise here because we stored u64s from GetSystemTimeAdjustmentPrecise
             let _ = SetSystemTimeAdjustmentPrecise(self.original_adjustment, self.original_disabled);
         }
     }

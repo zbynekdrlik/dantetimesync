@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="1.1.79"
+VERSION="1.1.80"
 
 if [ "$1" == "--version" ]; then
     echo "Dante Time Sync Installer v$VERSION"
