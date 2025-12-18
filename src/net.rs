@@ -218,22 +218,20 @@ pub fn parse_ptp_from_pcap(data: &[u8], ts_sec: i64, ts_usec: i64) -> Option<(Ve
 }
 
 /// Receive a PTP packet from pcap capture with timestamp
-/// Uses pcap header timestamp which is independent of system clock adjustments.
-/// The pcap timestamp may drift relative to system time, but this drift is
-/// compensated by the calibration mechanism. The key advantage is that pcap
-/// timestamps are NOT affected by our frequency adjustments, enabling the
-/// servo loop to converge properly.
+/// Uses SystemTime::now() for timestamps because:
+/// 1. Pcap timestamps drift independently of system clock (separate clock source)
+/// 2. Our frequency adjustments only affect system time, not pcap's clock
+/// 3. We need closed-loop feedback: measure and adjust the SAME clock
+/// The calibration mechanism compensates for any constant processing delay.
 pub fn recv_pcap_packet(cap: &mut Capture<Active>) -> Result<Option<(Vec<u8>, usize, SystemTime)>> {
     match cap.next_packet() {
         Ok(packet) => {
-            // Use pcap header timestamp - independent of system clock adjustments
-            // On Windows, ts.tv_sec is i32, so we need to convert
-            let ts = packet.header;
-            let ts_sec: i64 = ts.ts.tv_sec.into();
-            let ts_usec: i64 = ts.ts.tv_usec.into();
+            // Use SystemTime::now() - this IS affected by our frequency adjustments,
+            // which is exactly what we need for closed-loop servo operation.
+            let rx_time = SystemTime::now();
 
-            if let Some((payload, size, timestamp)) = parse_ptp_from_pcap(packet.data, ts_sec, ts_usec) {
-                Ok(Some((payload, size, timestamp)))
+            if let Some((payload, size, _)) = parse_ptp_from_pcap(packet.data, 0, 0) {
+                Ok(Some((payload, size, rx_time)))
             } else {
                 Ok(None)
             }

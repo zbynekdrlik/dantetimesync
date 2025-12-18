@@ -39,7 +39,9 @@ impl Default for SystemConfig {
                     panic_threshold_ns: 500_000_000, // 500ms
                     sample_window_size: 16, // Larger window to filter Windows jitter
                     min_delta_ns: 0,
-                    calibration_samples: 64, // More samples for stable calibration
+                    // Calibration disabled: we use SystemTime::now() which measures the actual
+                    // system clock. Calibration would subtract the real offset, hiding it from servo.
+                    calibration_samples: 0,
                 },
             }
         }
