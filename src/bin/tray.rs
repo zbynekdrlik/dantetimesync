@@ -8,7 +8,7 @@ fn main() {
 #[cfg(windows)]
 mod app {
     use tray_icon::{TrayIconBuilder, menu::{Menu, MenuItem, MenuEvent}, Icon};
-    use winit::event_loop::{EventLoop, ControlFlow, EventLoopBuilder, EventLoopProxy};
+    use winit::event_loop::{ControlFlow, EventLoopBuilder};
     use winit::event::Event;
     use tokio::net::windows::named_pipe::ClientOptions;
     use tokio::io::AsyncReadExt;
@@ -19,9 +19,9 @@ mod app {
     struct SyncStatus {
         pub offset_ns: i64,
         pub drift_ppm: f64,
-        pub gm_uuid: Option<[u8; 6]>,
+        pub _gm_uuid: Option<[u8; 6]>,
         pub settled: bool,
-        pub updated_ts: u64,
+        pub _updated_ts: u64,
     }
 
     #[derive(Debug)]

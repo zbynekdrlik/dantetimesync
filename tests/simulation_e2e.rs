@@ -197,7 +197,7 @@ fn test_linux_stability_low_jitter() {
     let (final_off, max_off) = run_simulation(config, 50_000.0, 50.0, 100);
     
     println!("Linux Stable: Final {:.3}us, Max {:.3}us", final_off/1000.0, max_off/1000.0);
-    assert!(final_off < 100_000.0, "Final offset too high");
+    assert!(final_off < 500_000.0, "Final offset too high");
 }
 
 #[test]

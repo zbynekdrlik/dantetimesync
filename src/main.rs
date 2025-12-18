@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use clap::Parser;
 use log::{info, warn, error};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,23 +35,21 @@ use windows::Win32::Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES};
 #[cfg(windows)]
 use windows::core::PCWSTR;
 #[cfg(windows)]
-use windows::Win32::Foundation::{INVALID_HANDLE_VALUE, HANDLE, HLOCAL};
+use windows::Win32::Foundation::HLOCAL;
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::NamedPipeServer;
-#[cfg(windows)]
-use std::os::windows::io::FromRawHandle;
 
 // Constants for Pipe (Manual definition to avoid import issues)
 #[cfg(windows)]
 const PIPE_ACCESS_OUTBOUND: u32 = 0x00000002;
 #[cfg(windows)]
 const FILE_FLAG_OVERLAPPED: u32 = 0x40000000;
-#[cfg(windows)]
-const PIPE_TYPE_MESSAGE: u32 = 0x00000004;
-#[cfg(windows)]
-const PIPE_READMODE_MESSAGE: u32 = 0x00000002;
-#[cfg(windows)]
-const PIPE_WAIT: u32 = 0x00000000;
+// #[cfg(windows)]
+// const PIPE_TYPE_MESSAGE: u32 = 0x00000004;
+// #[cfg(windows)]
+// const PIPE_READMODE_MESSAGE: u32 = 0x00000002;
+// #[cfg(windows)]
+// const PIPE_WAIT: u32 = 0x00000000;
 #[cfg(windows)]
 const PIPE_UNLIMITED_INSTANCES: u32 = 255;
 
@@ -501,9 +499,8 @@ const SERVICE_NAME: &str = "dantetimesync";
 #[cfg(windows)]
 const SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
 
-#[cfg(windows)]
-fn run_service_logic(args: Args, config: Config) -> Result<()> {
-    define_windows_service!(ffi_service_main, my_service_main);
+fn run_service_logic(_args: Args, _config: Config) -> Result<()> {
+    info!("Service logic starting...");
 
     fn my_service_main(_arguments: Vec<OsString>) {
         // We need to reload config or pass it? 

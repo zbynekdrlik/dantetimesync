@@ -60,7 +60,7 @@ impl WindowsClock {
             OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut token)?;
             
             let mut luid = LUID::default();
-            let mut name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+            let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
             LookupPrivilegeValueW(PCWSTR::null(), PCWSTR(name_wide.as_ptr()), &mut luid)?;
             
             let mut tp = TOKEN_PRIVILEGES {
