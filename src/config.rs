@@ -35,11 +35,11 @@ impl Default for SystemConfig {
                     max_integral_ppm: 100_000.0,
                 },
                 filters: FilterConfig {
-                    step_threshold_ns: 10_000_000, // 10ms - with calibration, offsets should be small
-                    panic_threshold_ns: 50_000_000, // 50ms
+                    step_threshold_ns: 50_000_000, // 50ms - allow servo to converge
+                    panic_threshold_ns: 200_000_000, // 200ms
                     sample_window_size: 8, // Increase window to filter jitter
                     min_delta_ns: 0,
-                    calibration_samples: 32, // Calibrate pcap timestamp offset
+                    calibration_samples: 32, // Calibrate SystemTime offset
                 },
             }
         }
