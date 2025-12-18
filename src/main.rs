@@ -150,15 +150,18 @@ impl NtpSource for RealNtpSource {
     }
 }
 
+// Legacy UDP-based PTP network (used on Linux with kernel timestamping)
+#[cfg(unix)]
 struct RealPtpNetwork {
     sock_event: UdpSocket,
     sock_general: UdpSocket,
 }
 
+#[cfg(unix)]
 impl PtpNetwork for RealPtpNetwork {
     fn recv_packet(&mut self) -> Result<Option<(Vec<u8>, usize, SystemTime)>> {
         let mut buf = [0u8; 2048];
-        
+
         loop {
             // Check Event Socket
             match net::recv_with_timestamp(&self.sock_event, &mut buf) {
@@ -199,6 +202,25 @@ impl PtpNetwork for RealPtpNetwork {
                 Err(_) => break,
             }
         }
+        Ok(())
+    }
+}
+
+// Pcap-based PTP network (used on Windows for accurate timestamps)
+#[cfg(windows)]
+struct RealPtpNetwork {
+    pcap_capture: pcap::Capture<pcap::Active>,
+}
+
+#[cfg(windows)]
+impl PtpNetwork for RealPtpNetwork {
+    fn recv_packet(&mut self) -> Result<Option<(Vec<u8>, usize, SystemTime)>> {
+        net::recv_pcap_packet(&mut self.pcap_capture)
+    }
+
+    fn reset(&mut self) -> Result<()> {
+        // Pcap doesn't have a buffer drain concept in the same way
+        // The filter ensures we only get PTP packets anyway
         Ok(())
     }
 }
@@ -421,15 +443,36 @@ fn run_sync_loop(args: Args, running: Arc<AtomicBool>, system_config: SystemConf
             }
         }
     };
-    
-    // Create sockets to join multicast groups (IGMP)
-    let sock_event = net::create_multicast_socket(ptp::PTP_EVENT_PORT, iface_ip)?;
-    let sock_general = net::create_multicast_socket(ptp::PTP_GENERAL_PORT, iface_ip)?;
-    info!("Joined Multicast Groups on {} ({})", iface_name, iface_ip);
 
-    let network = RealPtpNetwork {
-        sock_event,
-        sock_general,
+    // Platform-specific network setup
+    #[cfg(unix)]
+    let network = {
+        // Create sockets to join multicast groups (IGMP) with kernel timestamping
+        let sock_event = net::create_multicast_socket(ptp::PTP_EVENT_PORT, iface_ip)?;
+        let sock_general = net::create_multicast_socket(ptp::PTP_GENERAL_PORT, iface_ip)?;
+        info!("Joined Multicast Groups on {} ({}) - Kernel timestamping", iface_name, iface_ip);
+
+        RealPtpNetwork {
+            sock_event,
+            sock_general,
+        }
+    };
+
+    #[cfg(windows)]
+    let network = {
+        // Use pcap for accurate packet timestamps on Windows
+        // First, still join multicast via UDP sockets (for IGMP membership)
+        let _sock_event = net::create_multicast_socket(ptp::PTP_EVENT_PORT, iface_ip)?;
+        let _sock_general = net::create_multicast_socket(ptp::PTP_GENERAL_PORT, iface_ip)?;
+        info!("IGMP multicast joined on {} ({})", iface_name, iface_ip);
+
+        // Create pcap capture for accurate timestamps
+        let pcap_capture = net::create_pcap_capture(&iface_name)?;
+        info!("Using PCAP capture for PTP timestamps on Windows");
+
+        RealPtpNetwork {
+            pcap_capture,
+        }
     };
     
     let ntp_source = RealNtpSource {
