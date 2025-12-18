@@ -39,24 +39,22 @@ impl WindowsClock {
         
         info!("Windows Clock Initial State: Adj={}, Inc={}, Disabled={}", adj, inc, disabled.as_bool());
 
-        // Sanity check for "Broken HAL" (Reporting 1s instead of 15.6ms)
-        let mut nominal = inc;
-        if inc > 200_000 {
-            warn!("Reported Time Increment {} is too large (>20ms). Suspect broken HAL (64Hz vs 1Hz). Forcing standard 156,250 (15.625ms).", inc);
-            nominal = 156_250;
-        }
+        // The reported Inc value from broken HALs (10,000,000) represents the actual
+        // clock divisor the Windows kernel uses. We must use this value for our adjustments
+        // to maintain correct time rate.
+        let nominal = inc;
+        info!("Using HAL-reported increment {} as nominal frequency", nominal);
 
-        // CRITICAL: If Disabled=true or broken HAL, we MUST set the adjustment immediately
-        // Otherwise Windows uses the HAL's default which causes time to run 64x too fast/slow
-        if disabled.as_bool() || inc > 200_000 {
-            info!("Setting initial clock adjustment to nominal={} to override broken HAL/disabled state", nominal);
+        // If adjustment is currently disabled, enable it with the nominal value
+        if disabled.as_bool() {
+            info!("Setting initial clock adjustment to nominal={}", nominal);
             unsafe {
                 if let Err(e) = SetSystemTimeAdjustmentPrecise(nominal, false) {
                     error!("Failed to set initial adjustment: {}", e);
                     return Err(anyhow!("Failed to set initial adjustment: {}", e));
                 }
             }
-            info!("Initial clock adjustment set successfully. Time should now run at 1x speed.");
+            info!("Initial clock adjustment set successfully.");
         }
 
         Ok(WindowsClock {
