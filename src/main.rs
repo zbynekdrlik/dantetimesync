@@ -499,6 +499,7 @@ const SERVICE_NAME: &str = "dantetimesync";
 #[cfg(windows)]
 const SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
 
+#[cfg(windows)]
 fn run_service_logic(_args: Args, _config: Config) -> Result<()> {
     info!("Service logic starting...");
 
