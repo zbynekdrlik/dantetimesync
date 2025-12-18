@@ -98,14 +98,17 @@ impl WindowsClock {
 }
 
 impl SystemClock for WindowsClock {
-    fn adjust_frequency(&mut self, ppm: f64) -> Result<()> {
-        // Calculate new adjustment based on nominal frequency
-        // Adj = Nominal * (1 + ppm/1e6)
-        let adj_f = self.nominal_frequency as f64 * (1.0 + ppm / 1_000_000.0);
-        let new_adj = adj_f.round() as u64;
+    fn adjust_frequency(&mut self, factor: f64) -> Result<()> {
+        // factor is the ratio: 1.0 = no change, 1.001 = speed up by 1000 ppm
+        // Adjustment = Nominal * factor
+        let new_adj = (self.nominal_frequency as f64 * factor).round() as u64;
+
+        // Convert factor to PPM for logging
+        let ppm = (factor - 1.0) * 1_000_000.0;
 
         unsafe {
-            debug!("Adjusting frequency (Precise): PPM={:.3}, Base={}, NewAdj={}", ppm, self.nominal_frequency, new_adj);
+            debug!("Adjusting frequency (Precise): Factor={:.9}, PPM={:.3}, Base={}, NewAdj={}",
+                   factor, ppm, self.nominal_frequency, new_adj);
 
             if let Err(e) = SetSystemTimeAdjustmentPrecise(new_adj, false) {
                 error!("SetSystemTimeAdjustmentPrecise failed: {}", e);
