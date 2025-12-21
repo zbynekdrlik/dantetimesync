@@ -83,6 +83,22 @@ where
         let calibration_count = config.filters.calibration_samples;
         let calibration_complete = calibration_count == 0;
 
+        // Log configuration at startup
+        info!("=== PTP Controller Initialization ===");
+        info!("Servo Config: Kp={}, Ki={}, MaxFreq={:.0} PPM, MaxIntegral={:.0} PPM",
+              config.servo.kp, config.servo.ki,
+              config.servo.max_freq_adj_ppm, config.servo.max_integral_ppm);
+        info!("Filter Config: StepThreshold={:.1}ms, PanicThreshold={:.1}ms, WindowSize={}, MinDelta={}ns",
+              config.filters.step_threshold_ns as f64 / 1_000_000.0,
+              config.filters.panic_threshold_ns as f64 / 1_000_000.0,
+              config.filters.sample_window_size,
+              config.filters.min_delta_ns);
+        info!("Calibration: {} samples ({})",
+              config.filters.calibration_samples,
+              if config.filters.calibration_samples > 0 { "enabled" } else { "disabled" });
+        info!("PTP Stepping: {}", if config.filters.ptp_stepping_enabled { "enabled" } else { "DISABLED (frequency-only sync)" });
+        info!("=== PTP Controller Ready ===");
+
         PtpController {
             clock,
             network,
@@ -388,20 +404,46 @@ where
                 // This handles second-boundary crossing artifacts where measurements
                 // can flip between e.g. +300ms and -700ms due to T1/T2 crossing
                 // different second boundaries.
+
+                // Log sample window contents for diagnostics
+                let window_us: Vec<f64> = self.sample_window.iter()
+                    .map(|&x| x as f64 / 1000.0)
+                    .collect();
+                let min_us = window_us.iter().cloned().fold(f64::INFINITY, f64::min);
+                let max_us = window_us.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                let mean_us: f64 = window_us.iter().sum::<f64>() / window_us.len() as f64;
+                let spread_us = max_us - min_us;
+
+                // Detect if there's a bimodal distribution (second boundary crossing)
+                let bimodal = spread_us > 100_000.0; // > 100ms spread suggests boundary crossing
+
+                debug!("[Window] Samples(µs): {:?}", window_us.iter().map(|x| format!("{:.1}", x)).collect::<Vec<_>>());
+                debug!("[Window] Min={:.1}µs, Max={:.1}µs, Mean={:.1}µs, Spread={:.1}µs {}",
+                       min_us, max_us, mean_us, spread_us,
+                       if bimodal { "(BIMODAL - boundary crossing detected)" } else { "" });
+
                 if let Some(&lucky_offset) = self.sample_window.iter().min_by_key(|&&x| x.abs()) {
+                    let lucky_us = lucky_offset as f64 / 1000.0;
 
                     self.last_phase_offset_ns = lucky_offset;
-                    
+
+                    // Log before servo calculation
+                    debug!("[LuckyPacket] Selected={:.1}µs (|abs|={:.1}µs)", lucky_us, lucky_us.abs());
+
                     let adj_ppm = self.servo.sample(lucky_offset);
                     self.last_adj_ppm = adj_ppm;
-                    
+
                     let factor = 1.0 + (adj_ppm / 1_000_000.0);
-                    
+
+                    // Log the servo output and correction
+                    info!("[Sync] Offset={:+.1}µs | Correction={:+.3}ppm | Factor={:.9}",
+                          lucky_us, adj_ppm, factor);
+
                     if let Err(e) = self.clock.adjust_frequency(factor) {
                         warn!("Clock adjustment failed: {}", e);
                     }
-                    
-                    // Update shared status here (once every 8 packets)
+
+                    // Update shared status here (once every N packets)
                     self.update_shared_status();
                 }
                 self.sample_window.clear();
