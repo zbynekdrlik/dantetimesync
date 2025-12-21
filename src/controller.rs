@@ -20,8 +20,8 @@ const NTP_BIAS_THRESHOLD_MS: f64 = 5.0;  // Start correcting if NTP offset > 5ms
 // Two-phase sync parameters - tuned for Windows timestamp jitter
 const ACQUISITION_FILTER_WEIGHT: f64 = 0.2;  // Slower filter: less reactive to jitter
 const PRODUCTION_FILTER_WEIGHT: f64 = 0.05; // Very slow filter for production stability
-const ACQUISITION_MAX_PPM: f64 = 500.0;      // Allow large corrections during acquisition
-const PRODUCTION_MAX_PPM: f64 = 100.0;       // Allow reasonable corrections in production
+const ACQUISITION_MAX_PPM: f64 = 200.0;      // Allow large corrections during acquisition
+const PRODUCTION_MAX_PPM: f64 = 50.0;        // Conservative corrections in production
 const ACQUISITION_STABLE_COUNT: usize = 3;   // Require 3 stable samples to switch to production
 const ACQUISITION_STABLE_THRESHOLD_PPM: f64 = 20.0;  // Allow more variation due to jitter
 
@@ -567,15 +567,15 @@ where
                     // P-term: proportional to offset
                     // If behind (negative offset), add positive correction to speed up
                     // If ahead (positive offset), add negative correction to slow down
-                    // Gain is in PPM per microsecond of offset
-                    let p_gain = if self.in_production_mode { 0.01 } else { 0.05 };
+                    // Gain is in PPM per microsecond of offset (very small to prevent oscillation)
+                    let p_gain = if self.in_production_mode { 0.002 } else { 0.01 };
                     let p_term = -offset_us * p_gain;
 
                     // I-term: responds to drift rate
-                    // Only active when drift is significant (> 0.5 ppm)
+                    // Only active when drift is significant (> 1 ppm)
                     // This accumulates to find the steady-state correction needed
-                    let i_gain = if self.in_production_mode { 0.2 } else { 0.4 };
-                    let i_term = if self.measured_drift_ppm.abs() > 0.5 {
+                    let i_gain = if self.in_production_mode { 0.1 } else { 0.3 };
+                    let i_term = if self.measured_drift_ppm.abs() > 1.0 {
                         -self.measured_drift_ppm * i_gain
                     } else {
                         0.0  // Hold correction when drift is minimal
