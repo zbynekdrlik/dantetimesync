@@ -610,9 +610,10 @@ where
                     };
                     // I-term only active when:
                     // 1. Drift is significant (> 1 ppm), AND
-                    // 2. Offset is large (> 50us) - prevents oscillation when near target
+                    // 2. Offset is large (> 100us) - prevents oscillation when near target
                     // This creates a "dead zone" where correction is held when close to target
-                    let i_term = if self.measured_drift_ppm.abs() > 1.0 && offset_us.abs() > 50.0 {
+                    // The 100us threshold is chosen to be larger than typical jitter amplitude
+                    let i_term = if self.measured_drift_ppm.abs() > 1.0 && offset_us.abs() > 100.0 {
                         -self.measured_drift_ppm * i_gain
                     } else {
                         0.0  // Hold correction when offset is small or drift is minimal
