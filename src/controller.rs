@@ -555,13 +555,33 @@ where
                     // NTP is only used for initial time alignment at startup
                     // self.check_ntp_offset();  // Disabled
 
-                    // FREQUENCY CORRECTION with integral action:
-                    // The measured drift is the NET drift after our correction.
-                    // To drive it to zero, we must ACCUMULATE corrections.
-                    // Each sample, add a fraction of measured drift to our running correction.
-                    // This acts like an integral term in a PI controller.
-                    let integral_gain = if self.in_production_mode { 0.3 } else { 0.5 };
-                    self.applied_freq_ppm += -self.measured_drift_ppm * integral_gain;
+                    // FREQUENCY CORRECTION with PI control:
+                    // P-term: responds to offset magnitude (bring offset toward zero)
+                    // I-term: accumulates to correct steady-state drift
+                    //
+                    // The key insight: when offset is near zero, we should HOLD the
+                    // correction, not reduce it. Use offset-proportional adjustment.
+
+                    let offset_us = lucky_offset as f64 / 1000.0;
+
+                    // P-term: proportional to offset
+                    // If behind (negative offset), add positive correction to speed up
+                    // If ahead (positive offset), add negative correction to slow down
+                    // Gain is in PPM per microsecond of offset
+                    let p_gain = if self.in_production_mode { 0.01 } else { 0.05 };
+                    let p_term = -offset_us * p_gain;
+
+                    // I-term: responds to drift rate
+                    // Only active when drift is significant (> 0.5 ppm)
+                    // This accumulates to find the steady-state correction needed
+                    let i_gain = if self.in_production_mode { 0.2 } else { 0.4 };
+                    let i_term = if self.measured_drift_ppm.abs() > 0.5 {
+                        -self.measured_drift_ppm * i_gain
+                    } else {
+                        0.0  // Hold correction when drift is minimal
+                    };
+
+                    self.applied_freq_ppm += p_term + i_term;
                     let total_correction = self.applied_freq_ppm;
 
                     // Two-phase clamping: aggressive during acquisition, gentle during production
@@ -577,9 +597,11 @@ where
 
                     let factor = 1.0 + (clamped_correction / 1_000_000.0);
 
-                    // Log the correction
+                    // Log the correction with P and I terms
                     let mode_str = if self.in_production_mode { "PROD" } else { "ACQ" };
-                    info!("[Sync-{}] Offset={:+.1}us | MeasuredDrift={:+.1}ppm | Correction={:+.1}ppm | Factor={:.9}",
+                    debug!("[Sync-{}] P={:+.2} I={:+.2} Total={:+.1}ppm",
+                           mode_str, p_term, i_term, clamped_correction);
+                    info!("[Sync-{}] Offset={:+.1}us | Drift={:+.1}ppm | Correction={:+.1}ppm | Factor={:.9}",
                           mode_str, lucky_us, self.measured_drift_ppm, clamped_correction, factor);
 
                     if let Err(e) = self.clock.adjust_frequency(factor) {
