@@ -16,7 +16,7 @@ serde_json = "1.0"
 
 [package]
 name = "dantetimesync"
-version = "1.2.11"
+version = "1.2.12"
 edition = "2021"
 
 [target.'cfg(windows)'.dependencies]

@@ -17,13 +17,13 @@ const NTP_CHECK_INTERVAL: Duration = Duration::from_secs(60);   // Check NTP eve
 const NTP_BIAS_MAX_PPM: f64 = 100.0;  // Max bias to correct NTP drift (gentle correction)
 const NTP_BIAS_THRESHOLD_MS: f64 = 5.0;  // Start correcting if NTP offset > 5ms
 
-// Two-phase sync parameters
-const ACQUISITION_FILTER_WEIGHT: f64 = 0.7;  // Fast filter: 0.7 new + 0.3 old
-const PRODUCTION_FILTER_WEIGHT: f64 = 0.3;   // Slow filter: 0.3 new + 0.7 old
-const ACQUISITION_MAX_PPM: f64 = 500.0;      // Aggressive during acquisition
-const PRODUCTION_MAX_PPM: f64 = 50.0;        // Gentle during production (avoid audio glitches)
-const ACQUISITION_STABLE_COUNT: usize = 5;   // Require 5 stable samples to switch to production
-const ACQUISITION_STABLE_THRESHOLD_PPM: f64 = 10.0;  // Drift must be stable within 10 PPM
+// Two-phase sync parameters - tuned for Windows timestamp jitter
+const ACQUISITION_FILTER_WEIGHT: f64 = 0.2;  // Slower filter: less reactive to jitter
+const PRODUCTION_FILTER_WEIGHT: f64 = 0.05; // Very slow filter for production stability
+const ACQUISITION_MAX_PPM: f64 = 100.0;      // Moderate during acquisition
+const PRODUCTION_MAX_PPM: f64 = 20.0;        // Very gentle during production
+const ACQUISITION_STABLE_COUNT: usize = 3;   // Require 3 stable samples to switch to production
+const ACQUISITION_STABLE_THRESHOLD_PPM: f64 = 20.0;  // Allow more variation due to jitter
 
 pub struct PtpController<C, N, S>
 where
