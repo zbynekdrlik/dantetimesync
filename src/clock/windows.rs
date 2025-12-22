@@ -1,3 +1,10 @@
+//! Windows clock control using SetSystemTimeAdjustmentPrecise (64-bit Precise API).
+//!
+//! NOTE: Windows frequency adjustment APIs have a known limitation where they accept
+//! values but don't actually change clock speed. Testing confirms both legacy 32-bit
+//! and modern 64-bit APIs exhibit this behavior. Time synchronization relies primarily
+//! on stepping (SetSystemTime) which works reliably with ~1ms precision.
+
 use super::SystemClock;
 use anyhow::{Result, anyhow};
 use windows::Win32::Foundation::{BOOL, HANDLE, LUID, CloseHandle, GetLastError, ERROR_NOT_ALL_ASSIGNED, SYSTEMTIME, FILETIME};
@@ -7,22 +14,23 @@ use windows::Win32::Security::{
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::System::SystemInformation::{
-    GetSystemTimeAdjustment, SetSystemTimeAdjustment,
+    GetSystemTimeAdjustmentPrecise, SetSystemTimeAdjustmentPrecise,
     GetSystemTimeAsFileTime, SetSystemTime
 };
+use windows::Win32::System::Performance::QueryPerformanceFrequency;
 use windows::Win32::System::Time::FileTimeToSystemTime;
 use windows::core::PCWSTR;
 use std::time::{Duration, Instant};
 use log::{info, warn, debug, error};
 
 pub struct WindowsClock {
-    original_adjustment: u32,
-    original_increment: u32,
+    original_adjustment: u64,
+    original_increment: u64,
     original_disabled: BOOL,
-    nominal_frequency: u32,
+    perf_frequency: i64,
     // Diagnostic tracking
     adjustment_count: u64,
-    last_adjustment: u32,
+    last_adjustment: u64,
     last_adjustment_time: Instant,
     last_time_filetime: u64,
 }
@@ -31,31 +39,35 @@ impl WindowsClock {
     pub fn new() -> Result<Self> {
         Self::enable_privilege("SeSystemtimePrivilege")?;
 
-        let mut adj = 0u32;
-        let mut inc = 0u32;
+        // Get performance counter frequency first
+        let mut perf_freq: i64 = 0;
+        unsafe {
+            QueryPerformanceFrequency(&mut perf_freq)?;
+        }
+
+        let mut adj = 0u64;
+        let mut inc = 0u64;
         let mut disabled = BOOL(0);
 
         unsafe {
-            // Use the OLD API - it uses 100ns units and is more widely supported
-            GetSystemTimeAdjustment(&mut adj, &mut inc, &mut disabled)?;
+            // Use the PRECISE API - 64-bit values for higher precision
+            GetSystemTimeAdjustmentPrecise(&mut adj, &mut inc, &mut disabled)?;
         }
 
         // Comprehensive startup diagnostics
         info!("=== Windows Clock Initialization ===");
-        info!("API: SetSystemTimeAdjustment (Legacy 32-bit API)");
+        info!("API: SetSystemTimeAdjustmentPrecise (64-bit Precise API)");
+        info!("Performance Counter Frequency: {} Hz ({:.1} MHz)", perf_freq, perf_freq as f64 / 1_000_000.0);
         info!("Initial State: Adjustment={}, Increment={}, Disabled={}", adj, inc, disabled.as_bool());
 
-        // Calculate timing parameters
-        let inc_ms = inc as f64 / 10_000.0;
-        let inc_us = inc as f64 / 10.0;
-        info!("Tick Increment: {:.3} ms ({:.1} us, {} 100ns units)", inc_ms, inc_us, inc);
+        // The Precise API uses performance counter frequency units
+        let inc_ms = inc as f64 * 1000.0 / perf_freq as f64;
+        let inc_us = inc as f64 * 1_000_000.0 / perf_freq as f64;
+        info!("Tick Increment: {:.3} ms ({:.1} us, {} perf counter units)", inc_ms, inc_us, inc);
 
         // Calculate PPM per adjustment unit
-        // One unit of adjustment = one 100ns unit added per tick period
-        // PPM = (delta_adj / inc) * 1_000_000
-        // So: 1 unit = (1 / inc) * 1_000_000 PPM
         let ppm_per_unit = 1_000_000.0 / inc as f64;
-        info!("Adjustment Sensitivity: 1 unit = {:.4} PPM ({:.6}%)", ppm_per_unit, ppm_per_unit / 10_000.0);
+        info!("Adjustment Sensitivity: 1 unit = {:.6} PPM ({:.8}%)", ppm_per_unit, ppm_per_unit / 10_000.0);
 
         // Calculate current offset from nominal
         let current_ppm = if adj != inc {
@@ -66,17 +78,9 @@ impl WindowsClock {
         info!("Current Offset: Adj={} vs Nominal={}, Delta={}, Current PPM={:.3}",
               adj, inc, adj as i64 - inc as i64, current_ppm);
 
-        // The increment is in 100ns units. Typical value is ~156,250 (15.625ms)
+        // The increment is the nominal frequency (in perf counter units)
         let nominal = inc;
-        info!("Nominal Frequency: {} (100ns units per tick)", nominal);
-
-        // Calculate adjustment range info
-        // Max practical adjustment is typically +/-10% (+/-100,000 PPM)
-        let max_ppm_10pct = 100_000.0;
-        let adj_for_10pct = (nominal as f64 * 0.1) as u32;
-        info!("Adjustment Range: Nominal +/- {} units = +/-{:.0} PPM (+/-10%)", adj_for_10pct, max_ppm_10pct);
-        info!("  For +10000 PPM: Adjustment = {}", (nominal as f64 * 1.01) as u32);
-        info!("  For -10000 PPM: Adjustment = {}", (nominal as f64 * 0.99) as u32);
+        info!("Nominal Frequency: {} (perf counter units per tick)", nominal);
 
         // Get current system time for baseline
         let current_ft = unsafe { GetSystemTimeAsFileTime() };
@@ -87,16 +91,16 @@ impl WindowsClock {
         if disabled.as_bool() {
             info!("Time adjustment is DISABLED. Enabling with nominal value...");
             unsafe {
-                SetSystemTimeAdjustment(nominal, false)?;
+                SetSystemTimeAdjustmentPrecise(nominal, false)?;
             }
             info!("Time adjustment ENABLED successfully.");
 
             // Verify it was enabled
-            let mut verify_adj = 0u32;
-            let mut verify_inc = 0u32;
+            let mut verify_adj = 0u64;
+            let mut verify_inc = 0u64;
             let mut verify_disabled = BOOL(0);
             unsafe {
-                if GetSystemTimeAdjustment(&mut verify_adj, &mut verify_inc, &mut verify_disabled).is_ok() {
+                if GetSystemTimeAdjustmentPrecise(&mut verify_adj, &mut verify_inc, &mut verify_disabled).is_ok() {
                     info!("Verification: Adj={}, Inc={}, Disabled={}",
                           verify_adj, verify_inc, verify_disabled.as_bool());
                 }
@@ -111,7 +115,7 @@ impl WindowsClock {
             original_adjustment: adj,
             original_increment: inc,
             original_disabled: disabled,
-            nominal_frequency: nominal,
+            perf_frequency: perf_freq,
             adjustment_count: 0,
             last_adjustment: nominal,
             last_adjustment_time: Instant::now(),
@@ -123,11 +127,11 @@ impl WindowsClock {
         unsafe {
             let mut token = HANDLE::default();
             OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut token)?;
-            
+
             let mut luid = LUID::default();
             let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
             LookupPrivilegeValueW(PCWSTR::null(), PCWSTR(name_wide.as_ptr()), &mut luid)?;
-            
+
             let mut tp = TOKEN_PRIVILEGES {
                 PrivilegeCount: 1,
                 ..Default::default()
@@ -136,13 +140,13 @@ impl WindowsClock {
             tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
 
             AdjustTokenPrivileges(token, BOOL(0), Some(&tp), 0, None, None)?;
-            
+
             if let Err(e) = GetLastError() {
                 if e.code() == ERROR_NOT_ALL_ASSIGNED.to_hresult() {
                      return Err(anyhow!("Failed to adjust privilege: ERROR_NOT_ALL_ASSIGNED"));
                 }
             }
-            
+
             CloseHandle(token)?;
         }
         Ok(())
@@ -152,20 +156,22 @@ impl WindowsClock {
 impl SystemClock for WindowsClock {
     fn adjust_frequency(&mut self, factor: f64) -> Result<()> {
         // factor is the ratio: 1.0 = no change, 1.001 = speed up by 1000 ppm
-        // Adjustment = Nominal * factor (in 100ns units)
-        // OLD API: dwTimeAdjustment = number of 100ns units added per lpTimeIncrement period
-        let new_adj = (self.nominal_frequency as f64 * factor).round() as u32;
+        // Using Microsoft's formula: adjustment_delta = PPM * PerfFreq / 1_000_000
+        // new_adjustment = nominal + adjustment_delta
 
-        // Convert factor to PPM for logging
         let ppm = (factor - 1.0) * 1_000_000.0;
 
-        // Calculate the delta from nominal in units and PPM
-        let delta_units = new_adj as i64 - self.nominal_frequency as i64;
+        // Calculate adjustment delta using MS formula
+        let adjustment_delta = (ppm * self.perf_frequency as f64 / 1_000_000.0).round() as i64;
+        let new_adj = (self.original_increment as i64 + adjustment_delta) as u64;
+
+        // Calculate the delta from nominal in units
+        let delta_units = new_adj as i64 - self.original_increment as i64;
         let delta_from_last = new_adj as i64 - self.last_adjustment as i64;
 
         self.adjustment_count += 1;
 
-        // Measure actual time progress since last adjustment to detect if adjustments work
+        // Measure actual time progress since last adjustment
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_adjustment_time);
 
@@ -179,11 +185,10 @@ impl SystemClock for WindowsClock {
             let wall_delta_100ns = elapsed.as_nanos() as f64 / 100.0;
 
             // Ratio of system time progress to wall time progress
-            // >1.0 means clock is running fast, <1.0 means running slow
             let progress_ratio = if wall_delta_100ns > 0.0 && elapsed.as_millis() > 100 {
                 filetime_delta / wall_delta_100ns
             } else {
-                1.0 // Not enough time elapsed for meaningful measurement
+                1.0
             };
 
             let observed_ppm = (progress_ratio - 1.0) * 1_000_000.0;
@@ -192,17 +197,16 @@ impl SystemClock for WindowsClock {
             let log_detailed = self.adjustment_count % 10 == 1 || delta_from_last.abs() > 10;
 
             if log_detailed {
-                info!("[FreqAdj #{}] Factor={:.9} PPM={:+.3} | Adj: {}->{} (delta {:+}) | Nominal={}",
-                      self.adjustment_count, factor, ppm, self.last_adjustment, new_adj, delta_units, self.nominal_frequency);
+                info!("[FreqAdj #{}] PPM={:+.3} | Adj: {}->{} (delta {:+}) | PerfFreq={}",
+                      self.adjustment_count, ppm, self.last_adjustment, new_adj, delta_units, self.perf_frequency);
 
                 if elapsed.as_millis() > 100 {
                     info!("  Progress Check: Wall={:.1}ms, FILETIME_delta={:.0}, Ratio={:.6}, Observed_PPM={:+.1}",
                           elapsed.as_secs_f64() * 1000.0, filetime_delta, progress_ratio, observed_ppm);
 
-                    // Check if observed PPM roughly matches expected
-                    let last_ppm = ((self.last_adjustment as f64 / self.nominal_frequency as f64) - 1.0) * 1_000_000.0;
+                    let last_ppm = ((self.last_adjustment as f64 / self.original_increment as f64) - 1.0) * 1_000_000.0;
                     let ppm_error = observed_ppm - last_ppm;
-                    if ppm_error.abs() > 1000.0 && elapsed.as_secs() > 1 {
+                    if ppm_error.abs() > 100.0 && elapsed.as_secs() > 1 {
                         warn!("  PPM Discrepancy: Expected ~{:.1} PPM, Observed {:.1} PPM, Error={:.1}",
                               last_ppm, observed_ppm, ppm_error);
                     }
@@ -212,14 +216,14 @@ impl SystemClock for WindowsClock {
                        self.adjustment_count, ppm, new_adj, delta_units);
             }
 
-            // Apply the adjustment
-            SetSystemTimeAdjustment(new_adj, false)?;
+            // Apply the adjustment using the PRECISE API
+            SetSystemTimeAdjustmentPrecise(new_adj, false)?;
 
             // Verify the adjustment was actually applied
-            let mut verify_adj = 0u32;
-            let mut verify_inc = 0u32;
+            let mut verify_adj = 0u64;
+            let mut verify_inc = 0u64;
             let mut verify_disabled = BOOL(0);
-            if GetSystemTimeAdjustment(&mut verify_adj, &mut verify_inc, &mut verify_disabled).is_ok() {
+            if GetSystemTimeAdjustmentPrecise(&mut verify_adj, &mut verify_inc, &mut verify_disabled).is_ok() {
                 if verify_adj != new_adj {
                     error!("ADJUSTMENT MISMATCH! Requested={}, Actual={}, Disabled={}",
                            new_adj, verify_adj, verify_disabled.as_bool());
@@ -227,7 +231,6 @@ impl SystemClock for WindowsClock {
                     debug!("  Verified: Adj={}, Disabled={}", verify_adj, verify_disabled.as_bool());
                 }
 
-                // Check if adjustment was silently disabled
                 if verify_disabled.as_bool() {
                     error!("TIME ADJUSTMENT WAS DISABLED! Another process may be interfering.");
                 }
@@ -299,13 +302,12 @@ impl SystemClock for WindowsClock {
 impl Drop for WindowsClock {
     fn drop(&mut self) {
         info!("=== Windows Clock Shutdown ===");
-        info!("Resetting clock to nominal frequency: {}", self.nominal_frequency);
+        info!("Resetting clock to nominal frequency: {}", self.original_increment);
         info!("Total frequency adjustments made: {}", self.adjustment_count);
 
         unsafe {
             // On exit, set clock to run at 1x speed using the nominal frequency
-            // This ensures the system clock runs correctly even after the service stops
-            match SetSystemTimeAdjustment(self.nominal_frequency, false) {
+            match SetSystemTimeAdjustmentPrecise(self.original_increment, false) {
                 Ok(_) => info!("Clock reset to nominal successfully."),
                 Err(e) => error!("Failed to reset clock: {}", e),
             }

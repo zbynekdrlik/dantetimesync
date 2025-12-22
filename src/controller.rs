@@ -496,6 +496,9 @@ where
                 self.update_rtc_now();
             } else {
                 // Check for massive drift while settled (only if PTP stepping is enabled)
+                debug!("[StepCheck] phase_offset={}us, threshold={}us, stepping_enabled={}",
+                       phase_offset_ns / 1000, self.config.filters.step_threshold_ns / 1000,
+                       self.config.filters.ptp_stepping_enabled);
                 if self.config.filters.ptp_stepping_enabled && phase_offset_ns.abs() > self.config.filters.step_threshold_ns {
                      warn!("Large offset {}us detected while settled. Stepping clock (Servo Integral maintained).", phase_offset_ns / 1_000);
 
