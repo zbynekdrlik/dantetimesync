@@ -285,6 +285,7 @@ mod app {
         // Track state for notifications
         let notification_state = RefCell::new(NotificationState {
             was_locked: false,
+            was_nano: false,
             was_online: false,
             first_update: true,
         });
