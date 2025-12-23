@@ -91,6 +91,11 @@ if ($Service) {
     Start-Sleep -Seconds 1
 }
 
+# Disable Windows Time service to prevent conflicts
+Write-Host "Disabling Windows Time service (W32Time)..."
+Stop-Service -Name "W32Time" -Force -ErrorAction SilentlyContinue
+Set-Service -Name "W32Time" -StartupType Disabled -ErrorAction SilentlyContinue
+
 # Kill processes forcefully to release file locks
 Write-Host "Checking for running processes..."
 Stop-Process -Name "dantetimesync" -Force -ErrorAction SilentlyContinue
