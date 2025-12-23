@@ -50,7 +50,7 @@ cargo test test_name
 RUST_LOG=debug cargo run
 ```
 
-**Windows cross-compilation** requires WinPcap Developer's Pack with `LIB` env var set to `WpdPack/Lib/x64`.
+**Windows cross-compilation** requires Npcap SDK 1.13+ with `LIB` env var set to `npcap-sdk/Lib/x64`.
 
 ## Hardware Constraints (CRITICAL)
 
@@ -69,18 +69,16 @@ Dante PTP Time Sync is a high-precision PTP (Precision Time Protocol) synchroniz
 ### Core Components
 
 - **`main.rs`** - Entry point, CLI parsing, Windows service logic, IPC server setup, and main sync loop orchestration
-- **`controller.rs`** - `PtpController<C, N, S>` - Generic controller that coordinates PTP sync. Handles Sync/FollowUp message pairs, lucky packet filtering, and clock adjustments
-- **`servo.rs`** - `PiServo` - PI (Proportional-Integral) servo loop for frequency adjustment. Takes phase offset in nanoseconds, outputs correction in PPM
+- **`controller.rs`** - `PtpController<C, N, S>` - Generic controller that coordinates PTP sync. Contains rate-based servo logic, mode transitions (ACQ→PROD→LOCK), and clock adjustments
 - **`ptp.rs`** - PTPv1 packet parsing (headers, Sync bodies, FollowUp bodies)
 - **`clock/mod.rs`** - `SystemClock` trait with platform-specific implementations:
   - `linux.rs` - Uses `adjtimex` for frequency adjustment
   - `windows.rs` - Uses `SetSystemTimeAdjustmentPrecise` API
 - **`traits.rs`** - `NtpSource` and `PtpNetwork` traits (mockable for testing)
 - **`config.rs`** - `SystemConfig`, `ServoConfig`, `FilterConfig` - tuning parameters with different defaults for Linux vs Windows
-- **`net.rs`** - Network utilities (multicast socket creation, interface detection, timestamping)
-- **`ntp.rs`** - NTP client for initial coarse time alignment
-- **`status.rs`** - `SyncStatus` struct shared via IPC to tray app
-- **`rtc.rs`** (Unix only) - Hardware RTC updates via ioctl
+- **`net.rs`** / **`net_pcap.rs`** / **`net_winsock.rs`** - Network utilities (multicast, timestamping, platform-specific packet capture)
+- **`ntp.rs`** - NTP client for UTC alignment
+- **`status.rs`** - `SyncStatus` struct shared via IPC to tray app (includes `is_locked`, `smoothed_rate_ppm`, `mode`)
 
 ### CRITICAL: Dante Time vs UTC Time
 
@@ -131,4 +129,8 @@ Key tunable parameters (in `config.rs`):
 ### Binaries
 
 - `dantetimesync` - Main sync daemon/service
-- `dantetray` - Windows tray application (reads status via named pipe IPC)
+- `dantetray` - Windows tray application:
+  - Dynamic icon with pulsing ring based on drift rate
+  - Toast notifications for state transitions (lock/unlock/offline)
+  - Service control (Restart/Stop) via menu
+  - Reads status via named pipe IPC (`\\.\pipe\dantetimesync`)

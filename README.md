@@ -3,44 +3,69 @@
 A high-precision PTP (Precision Time Protocol) synchronization tool optimized for Dante Audio networks, written in Rust.
 
 ## Features
-- **PTPv1 Support:** Syncs with Dante Grandmasters (PTPv1/UDP 319/320).
-- **Hybrid Mode:** Uses NTP for initial coarse alignment, then PTP for microsecond-precision frequency adjustment.
-- **Cross-Platform:** Runs on Linux and Windows.
-- **Hardware Control:** Adjusts system clock frequency directly (via `adjtimex` on Linux, `SetSystemTimeAdjustmentPrecise` on Windows).
-- **Resilient:** Filters "lucky packets" to minimize network jitter effects.
+
+### Core Sync
+- **PTPv1 Support:** Syncs with Dante Grandmasters (PTPv1/UDP 319/320)
+- **Hybrid Mode:** Uses NTP for UTC alignment + PTP for microsecond-precision frequency adjustment
+- **Cross-Platform:** Runs on Linux and Windows as a system service
+- **Rate-Based Servo:** Adaptive frequency control targeting <5µs/s drift rate
+- **Lucky Packet Filtering:** Minimizes network jitter effects
+
+### Windows Tray App
+- **Dynamic Icon:** Pulsing ring indicates drift rate (green=locked, yellow=acquiring, red=offline)
+- **Toast Notifications:** Alerts for lock achieved, lock lost, service online/offline
+- **Service Control:** Restart/Stop service directly from tray menu
+- **Live Status:** Tooltip shows drift rate, frequency adjustment, NTP offset
 
 ## Installation
 
 ### Linux
-Run the following command to install the latest version as a system service:
 ```bash
-curl -sSL https://raw.githubusercontent.com/zbynekdrlik/dantetimesync/master/setup.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/zbynekdrlik/dantetimesync/master/install.sh | sudo bash
 ```
 
 ### Windows
-1.  **Prerequisite:** Install [Npcap](https://npcap.com/#download) (Select "Install Npcap in WinPcap API-compatible Mode").
-2.  Open PowerShell as **Administrator**.
-3.  Run the following command to install the service and tray app:
+1. **Prerequisite:** Install [Npcap](https://npcap.com/#download) (Select "Install Npcap in WinPcap API-compatible Mode")
+2. Open PowerShell as **Administrator**
+3. Run:
 ```powershell
 irm https://raw.githubusercontent.com/zbynekdrlik/dantetimesync/master/install.ps1 | iex
+```
+
+## Uninstall
+
+### Windows
+```powershell
+irm https://raw.githubusercontent.com/zbynekdrlik/dantetimesync/master/uninstall.ps1 | iex
 ```
 
 ## Usage (Manual)
 ```bash
 dantetimesync [OPTIONS]
 ```
-- `--interface <NAME>`: Bind to specific interface (e.g., `eth0`).
-- `--ntp-server <IP>`: NTP server for initial sync (default: `10.77.8.2`).
-- `--skip-ntp`: Skip NTP sync.
-- `--service`: (Windows Only) Run as a Windows Service.
+- `--interface <NAME>`: Bind to specific interface (e.g., `eth0`)
+- `--ntp-server <IP>`: NTP server for initial sync (default: `10.77.8.2`)
+- `--skip-ntp`: Skip NTP sync
+- `--service`: (Windows Only) Run as a Windows Service
 
 ## Build from Source
 ```bash
 cargo build --release
 ```
+
 **Windows Build Requirements:**
 - Rust Toolchain (`x86_64-pc-windows-msvc`)
-- WinPcap Developer's Pack (extracted and `LIB` env var set to `WpdPack/Lib/x64`).
+- Npcap SDK 1.13+ (set `LIB` env var to `npcap-sdk/Lib/x64`)
+
+## Configuration
+
+Config files:
+- Linux: `/etc/dantetimesync/config.json`
+- Windows: `C:\ProgramData\DanteTimeSync\config.json`
+
+Log files:
+- Linux: `/var/log/dantetimesync/dantetimesync.log`
+- Windows: `C:\ProgramData\DanteTimeSync\dantetimesync.log`
 
 ## License
 MIT
