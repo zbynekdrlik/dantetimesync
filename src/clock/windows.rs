@@ -54,22 +54,14 @@ impl WindowsClock {
             GetSystemTimeAdjustmentPrecise(&mut adj, &mut inc, &mut disabled)?;
         }
 
-        info!("╔══════════════════════════════════════════════════════════════════╗");
-        info!("║           WINDOWS CLOCK INITIALIZATION                           ║");
-        info!("╠══════════════════════════════════════════════════════════════════╣");
-        info!("║ API: SetSystemTimeAdjustmentPrecise (64-bit)                     ║");
-        info!("╚══════════════════════════════════════════════════════════════════╝");
-
-        info!("Performance Counter Frequency: {} Hz ({:.3} MHz)", perf_freq, perf_freq as f64 / 1_000_000.0);
-        info!("Initial Adjustment: {} (Increment: {}, Disabled: {})", adj, inc, disabled.as_bool());
-
         // Calculate PPM sensitivity
         let ppm_per_unit = 1_000_000.0 / inc as f64;
-        info!("Sensitivity: 1 adjustment unit = {:.6} PPM", ppm_per_unit);
+        debug!("[Clock] Windows API initialized: PerfFreq={:.1}MHz, Sensitivity={:.6}PPM/unit",
+               perf_freq as f64 / 1_000_000.0, ppm_per_unit);
 
         // Current PPM offset from nominal
         let current_ppm = ((adj as f64 - inc as f64) / inc as f64) * 1_000_000.0;
-        info!("Current PPM offset: {:+.3} PPM (Adj {} vs Nominal {})", current_ppm, adj, inc);
+        debug!("Current PPM offset: {:+.3} PPM (Adj {} vs Nominal {})", current_ppm, adj, inc);
 
         // Enable adjustment if disabled
         if disabled.as_bool() {
@@ -337,11 +329,7 @@ impl SystemClock for WindowsClock {
 
 impl Drop for WindowsClock {
     fn drop(&mut self) {
-        info!("╔══════════════════════════════════════════════════════════════════╗");
-        info!("║           WINDOWS CLOCK SHUTDOWN                                 ║");
-        info!("╚══════════════════════════════════════════════════════════════════╝");
-        info!("Total frequency adjustments: {}", self.adjustment_count);
-        info!("Resetting to nominal: {}", self.original_increment);
+        debug!("[Clock] Shutdown: {} adjustments, resetting to nominal", self.adjustment_count);
 
         unsafe {
             match SetSystemTimeAdjustmentPrecise(self.original_increment, false) {
