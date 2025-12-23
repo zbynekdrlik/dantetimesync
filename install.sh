@@ -92,6 +92,11 @@ systemctl stop chrony 2>/dev/null || true
 systemctl disable chrony 2>/dev/null || true
 systemctl stop ntp 2>/dev/null || true
 systemctl disable ntp 2>/dev/null || true
+# Additional PTP/NTP services found on some systems
+systemctl stop ptp4l phc2sys time-sync-coordinator 2>/dev/null || true
+systemctl disable ptp4l phc2sys time-sync-coordinator 2>/dev/null || true
+# Disable NTP via timedatectl
+timedatectl set-ntp false 2>/dev/null || true
 
 # 6. Create Systemd Service
 echo ">>> Creating systemd service..."
