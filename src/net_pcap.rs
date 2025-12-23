@@ -95,13 +95,18 @@ impl NpcapPtpNetwork {
         // HostHighPrec uses KeQuerySystemTimePrecise() which is both high-precision AND synced with system time
         info!("[TS] Requesting HostHighPrec timestamps (KeQuerySystemTimePrecise)");
 
-        let capture = Capture::from_device(device.clone())?
+        let mut capture = Capture::from_device(device.clone())?
             .promisc(false)        // Don't use promiscuous - rely on IGMP multicast join
             .immediate_mode(true)  // Critical: disable buffering for lowest latency
             .snaplen(256)          // PTP packets are small
             .timeout(1)            // 1ms timeout for responsiveness
             .tstamp_type(TimestampType::HostHighPrec)
             .open()?;
+
+        // Apply BPF filter to only capture PTP multicast - reduces conflict with DVS
+        let ptp_filter = "udp and dst host 224.0.1.129 and (dst port 319 or dst port 320)";
+        capture.filter(ptp_filter, true)?;
+        info!("[Filter] Applied BPF: {}", ptp_filter);
 
         // Assume HostHighPrec is available on modern Npcap (1.20+)
         let using_hiprec = true;
