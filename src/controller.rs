@@ -74,6 +74,7 @@ const I_GAIN_NANO: f64 = 0.005;           // 10x smaller I-term
 const NANO_ENTER_RATE_US: f64 = 0.5;      // Enter NANO if drift < 0.5 µs/s
 const NANO_EXIT_RATE_US: f64 = 1.0;       // Exit NANO if drift > 1.0 µs/s
 const NANO_SUSTAIN_COUNT: usize = 15;     // 15 samples (~15s) to enter NANO
+const NANO_EXIT_COUNT: usize = 5;         // 5 consecutive samples above threshold to exit (hysteresis)
 const NANO_DEADBAND_US: f64 = 0.1;        // Ignore drift < 0.1 µs/s (noise floor)
 
 // Max drift baseline limit
@@ -162,7 +163,8 @@ where
 
     /// NANO mode state (ultra-precise for sub-µs capable systems)
     in_nano_mode: bool,
-    nano_sustain_count: usize,  // Track consecutive sub-threshold samples
+    nano_sustain_count: usize,  // Track consecutive sub-threshold samples for entry
+    nano_exit_count: usize,     // Track consecutive above-threshold samples for exit (hysteresis)
 
     // Rate-of-change tracking for Dante servo
     last_offset_us: Option<f64>,
@@ -244,6 +246,7 @@ where
             in_production_mode: false,
             in_nano_mode: false,
             nano_sustain_count: 0,
+            nano_exit_count: 0,
             last_offset_us: None,
             last_offset_time: None,
             smoothed_rate_ppm: 0.0,
@@ -692,6 +695,7 @@ where
         if self.is_locked {
             if abs_rate < NANO_ENTER_RATE_US {
                 self.nano_sustain_count += 1;
+                self.nano_exit_count = 0;  // Reset exit counter when drift is good
                 // Log progress towards NANO every 10 samples
                 if self.nano_sustain_count % 10 == 0 && !self.in_nano_mode {
                     debug!("[NANO] Sustain count: {}/{}", self.nano_sustain_count, NANO_SUSTAIN_COUNT);
@@ -702,23 +706,35 @@ where
                           NANO_SUSTAIN_COUNT);
                 }
             } else if abs_rate > NANO_EXIT_RATE_US {
+                // Above exit threshold - count towards exit (hysteresis)
+                self.nano_exit_count += 1;
                 if self.in_nano_mode {
-                    self.in_nano_mode = false;
-                    self.nano_sustain_count = 0;
-                    info!("[PTP] === LOCK MODE === Exiting NANO (drift {:+.2}us/s)", rate_ppm);
+                    if self.nano_exit_count >= NANO_EXIT_COUNT {
+                        self.in_nano_mode = false;
+                        self.nano_sustain_count = 0;
+                        self.nano_exit_count = 0;
+                        info!("[PTP] === LOCK MODE === Exiting NANO (drift {:+.2}us/s for {} samples)",
+                              rate_ppm, NANO_EXIT_COUNT);
+                    } else {
+                        debug!("[NANO] Exit warning {}/{}: drift {:+.2}us/s",
+                               self.nano_exit_count, NANO_EXIT_COUNT, rate_ppm);
+                    }
                 }
                 // Reset sustain count when we exceed exit threshold (even if not in NANO yet)
-                // This ensures we need 30 CONSECUTIVE samples below threshold
+                // This ensures we need CONSECUTIVE samples below threshold to enter
                 if self.nano_sustain_count > 0 {
-                    debug!("[NANO] Reset: drift {:+.2}us/s > exit threshold", abs_rate);
+                    debug!("[NANO] Reset entry counter: drift {:+.2}us/s > exit threshold", abs_rate);
                     self.nano_sustain_count = 0;
                 }
+            } else {
+                // Between thresholds (0.5-1.0): reset exit counter but don't change entry counter
+                self.nano_exit_count = 0;
             }
-            // Between thresholds (0.5-1.0): don't increment but don't reset either
         } else {
             // Not locked - can't be in NANO
             self.in_nano_mode = false;
             self.nano_sustain_count = 0;
+            self.nano_exit_count = 0;
         }
 
         // ACQ/PROD transitions
