@@ -136,18 +136,38 @@ try {
     Write-Error "Failed to start service. Check Event Viewer for details. Error: $_"
 }
 
-# 8. Setup Tray App (Startup)
+# 8. Setup Tray App (Startup) - Dual approach for reliability
 if (Test-Path $TrayPath) {
     Write-Host "Setting up Tray App to run at startup..."
-    
-    # Unregister if exists to ensure update
-    Unregister-ScheduledTask -TaskName "DanteTray" -Confirm:$false -ErrorAction SilentlyContinue
 
+    # Method 1: Scheduled Task (Primary - works for all users at logon)
+    Write-Host "  - Registering scheduled task..."
+    Unregister-ScheduledTask -TaskName "DanteTray" -Confirm:$false -ErrorAction SilentlyContinue
     $Trigger = New-ScheduledTaskTrigger -AtLogon
     $Action = New-ScheduledTaskAction -Execute $TrayPath
-    $Principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users" -RunLevel Highest
+    $Principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users" -RunLevel Limited
     Register-ScheduledTask -TaskName "DanteTray" -Trigger $Trigger -Action $Action -Principal $Principal -Force | Out-Null
-    
+
+    # Method 2: Registry Run entry (Fallback - per-user, more reliable in some scenarios)
+    Write-Host "  - Adding registry startup entry..."
+    $RegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+    try {
+        # Set for current user
+        Set-ItemProperty -Path $RegPath -Name "DanteTray" -Value "`"$TrayPath`"" -ErrorAction Stop
+        Write-Host "    Registry entry added for current user." -ForegroundColor Gray
+    } catch {
+        Write-Warning "Failed to add registry entry: $_"
+    }
+
+    # Also add to HKLM for all users (requires admin, which we have)
+    $RegPathLM = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+    try {
+        Set-ItemProperty -Path $RegPathLM -Name "DanteTray" -Value "`"$TrayPath`"" -ErrorAction Stop
+        Write-Host "    Registry entry added for all users." -ForegroundColor Gray
+    } catch {
+        Write-Warning "Failed to add machine-wide registry entry: $_"
+    }
+
     # Start it now if not running
     $TrayProcess = Get-Process -Name "dantetray" -ErrorAction SilentlyContinue
     if (!$TrayProcess) {

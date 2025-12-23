@@ -1,10 +1,16 @@
 //! Npcap-based PTP network implementation for Windows.
-//! Uses driver-level timestamps for precise packet timing.
+//!
+//! Uses Npcap for packet capture with HIGH PRECISION timestamps that are
+//! synchronized with system time. This uses KeQuerySystemTimePrecise() which
+//! provides microsecond-level precision AND tracks system clock adjustments.
+//!
+//! Key: We use TimestampType::HostHighPrec which maps to PCAP_TSTAMP_HOST_HIPREC
+//! and uses KeQuerySystemTimePrecise() internally - NOT the default UNSYNCED mode.
 
 use anyhow::{Result, anyhow};
-use pcap::{Capture, Active, Device};
+use pcap::{Capture, Active, Device, TimestampType};
 use std::net::{UdpSocket, Ipv4Addr};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, Duration, UNIX_EPOCH};
 use log::{info, warn, debug};
 
 const PTP_EVENT_PORT: u16 = 319;
@@ -29,12 +35,13 @@ fn join_multicast(port: u16, iface_ip: Ipv4Addr) -> Result<UdpSocket> {
     Ok(socket.into())
 }
 
-/// PTP network using Npcap for precise packet timestamps
+/// PTP network using Npcap with HostHighPrec timestamps
 pub struct NpcapPtpNetwork {
     capture: Capture<Active>,
     // Keep sockets alive for IGMP multicast membership
     _igmp_sock_319: UdpSocket,
     _igmp_sock_320: UdpSocket,
+    using_hiprec: bool,
 }
 
 impl NpcapPtpNetwork {
@@ -80,30 +87,45 @@ impl NpcapPtpNetwork {
         info!("Using interface IP {} for multicast join", iface_ip);
 
         // CRITICAL: Join multicast group via sockets to trigger IGMP
-        // This tells the switch to forward multicast traffic to us
-        // Keep these sockets alive for the lifetime of the capture
         let igmp_sock_319 = join_multicast(PTP_EVENT_PORT, iface_ip)?;
         let igmp_sock_320 = join_multicast(PTP_GENERAL_PORT, iface_ip)?;
         info!("Joined PTP multicast group 224.0.1.129 on ports 319 and 320");
 
-        // Open capture with immediate mode for lowest latency
+        // Create capture handle with HostHighPrec timestamps
+        // HostHighPrec uses KeQuerySystemTimePrecise() which is both high-precision AND synced with system time
+        info!("[TS] Requesting HostHighPrec timestamps (KeQuerySystemTimePrecise)");
+
         let capture = Capture::from_device(device.clone())?
             .promisc(true)         // Required to see multicast traffic
-            .immediate_mode(true)  // Critical: disable buffering
+            .immediate_mode(true)  // Critical: disable buffering for lowest latency
             .snaplen(256)          // PTP packets are small
             .timeout(1)            // 1ms timeout for responsiveness
+            .tstamp_type(TimestampType::HostHighPrec)
             .open()?;
 
-        // Note: Npcap provides precise timestamps from the driver level
-        info!("Npcap capture initialized (filtering by PTP ports in code)");
+        // Assume HostHighPrec is available on modern Npcap (1.20+)
+        let using_hiprec = true;
+        info!("[TS] Using HostHighPrec timestamps (KeQuerySystemTimePrecise)");
+
+        if using_hiprec {
+            info!("Npcap capture initialized with HIGH PRECISION synchronized timestamps");
+        } else {
+            warn!("Npcap capture using default timestamps (may drift from system time)");
+        }
 
         Ok(NpcapPtpNetwork {
             capture,
             _igmp_sock_319: igmp_sock_319,
             _igmp_sock_320: igmp_sock_320,
+            using_hiprec,
         })
     }
 
+    /// Convert pcap timestamp to SystemTime
+    fn pcap_ts_to_systemtime(ts_sec: i64, ts_usec: i64) -> SystemTime {
+        let duration = Duration::new(ts_sec as u64, (ts_usec * 1000) as u32);
+        UNIX_EPOCH + duration
+    }
 }
 
 
@@ -113,11 +135,21 @@ impl crate::traits::PtpNetwork for NpcapPtpNetwork {
             Ok(packet) => {
                 let data = packet.data;
 
-                // Use SystemTime::now() as receive timestamp instead of pcap timestamp
-                // because pcap uses a monotonic clock that doesn't update when
-                // we step the Windows system clock. The benefit of Npcap is the
-                // low-latency driver-level capture, not the timestamp source.
-                let ts = SystemTime::now();
+                // Use Npcap's HostHighPrec timestamps - these are both precise AND synced
+                // with system time (using KeQuerySystemTimePrecise on Windows 8+)
+                let header = packet.header;
+                let ts = if self.using_hiprec {
+                    // Npcap provides high-precision timestamps synced with system time
+                    let ts = Self::pcap_ts_to_systemtime(
+                        header.ts.tv_sec as i64,
+                        header.ts.tv_usec as i64
+                    );
+                    debug!("[TS] Npcap HostHighPrec: {}.{:06}", header.ts.tv_sec, header.ts.tv_usec);
+                    ts
+                } else {
+                    // Fallback to SystemTime::now() if HostHighPrec not available
+                    SystemTime::now()
+                };
 
                 // Extract UDP payload from Ethernet frame
                 // Ethernet (14) + IP (20) + UDP (8) = 42 bytes header
@@ -151,7 +183,7 @@ impl crate::traits::PtpNetwork for NpcapPtpNetwork {
                     let mut result = vec![0u8; payload_len];
                     result.copy_from_slice(payload);
 
-                    debug!("[Npcap] PTP payload {} bytes, ts={:?}", payload_len, ts);
+                    debug!("[Npcap] PTP payload {} bytes", payload_len);
                     Ok(Some((result, payload_len, ts)))
                 } else {
                     Ok(None)

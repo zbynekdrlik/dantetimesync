@@ -79,11 +79,26 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
           cp target/${{ matrix.target }}/release/${{ matrix.tray_artifact_name }} ${{ matrix.tray_asset_name }}
 
+      - name: Generate SHA256 Checksums (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sha256sum ${{ matrix.asset_name }} > ${{ matrix.asset_name }}.sha256
+
+      - name: Generate SHA256 Checksums (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          sha256sum ${{ matrix.asset_name }} > ${{ matrix.asset_name }}.sha256
+          sha256sum ${{ matrix.tray_asset_name }} > ${{ matrix.tray_asset_name }}.sha256
+
       - name: Upload Release Asset (Linux)
         if: runner.os == 'Linux'
         uses: softprops/action-gh-release@v1
         with:
-          files: ${{ matrix.asset_name }}
+          files: |
+            ${{ matrix.asset_name }}
+            ${{ matrix.asset_name }}.sha256
           generate_release_notes: true
 
       - name: Upload Release Asset (Windows)
@@ -92,5 +107,7 @@ jobs:
         with:
           files: |
             ${{ matrix.asset_name }}
+            ${{ matrix.asset_name }}.sha256
             ${{ matrix.tray_asset_name }}
+            ${{ matrix.tray_asset_name }}.sha256
           generate_release_notes: true

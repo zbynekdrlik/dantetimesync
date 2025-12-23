@@ -4,12 +4,11 @@ pub mod clock;
 pub mod ntp;
 pub mod traits;
 pub mod controller;
-pub mod servo;
 pub mod status;
 pub mod config;
 
-#[cfg(unix)]
-pub mod rtc;
+#[cfg(windows)]
+pub mod net_pcap;
 
-// Note: net_pcap module exists but is not used - Npcap timestamps use monotonic
-// clock that doesn't respect system clock steps, making it unsuitable for PTP.
+#[cfg(windows)]
+pub mod net_winsock;

@@ -1,2 +1,7 @@
 [target.x86_64-pc-windows-gnu]
 rustflags = ["-L", "/home/newlevel/npcap-sdk/Lib/x64"]
+
+[env]
+# Set libpcap version for pcap crate when cross-compiling to Windows
+# Npcap is based on libpcap 1.10.x - this enables tstamp_type() method
+LIBPCAP_VER = "1.10.0"

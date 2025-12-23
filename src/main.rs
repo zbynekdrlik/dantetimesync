@@ -4,18 +4,20 @@ use log::{info, warn, error};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 use std::process::Command;
 use std::fs::File;
-use std::io::ErrorKind;
-use std::net::UdpSocket;
 
 #[cfg(unix)]
+use anyhow::anyhow;
+#[cfg(unix)]
+use std::time::SystemTime;
+#[cfg(unix)]
+use std::io::ErrorKind;
+#[cfg(unix)]
+use std::net::UdpSocket;
+#[cfg(unix)]
 use std::os::unix::io::AsRawFd;
-#[cfg(unix)]
-use nix::sys::socket::{recvmsg, MsgFlags, ControlMessageOwned, SockaddrStorage};
-#[cfg(unix)]
-use nix::sys::time::TimeSpec;
 #[cfg(unix)]
 use nix::fcntl::{flock, FlockArg};
 
@@ -44,12 +46,6 @@ use tokio::net::windows::named_pipe::NamedPipeServer;
 const PIPE_ACCESS_OUTBOUND: u32 = 0x00000002;
 #[cfg(windows)]
 const FILE_FLAG_OVERLAPPED: u32 = 0x40000000;
-// #[cfg(windows)]
-// const PIPE_TYPE_MESSAGE: u32 = 0x00000004;
-// #[cfg(windows)]
-// const PIPE_READMODE_MESSAGE: u32 = 0x00000002;
-// #[cfg(windows)]
-// const PIPE_WAIT: u32 = 0x00000000;
 #[cfg(windows)]
 const PIPE_UNLIMITED_INSTANCES: u32 = 255;
 
@@ -80,11 +76,15 @@ use windows_service::
     };
 
 // Use library crate modules
-use dantetimesync::{ptp, net, clock, ntp, traits, controller, status, config};
+use dantetimesync::{net, clock, ntp, traits, controller, status, config};
 #[cfg(unix)]
-use dantetimesync::rtc;
+use dantetimesync::ptp;
+#[cfg(windows)]
+use dantetimesync::net_pcap;
 
-use traits::{NtpSource, PtpNetwork};
+use traits::NtpSource;
+#[cfg(unix)]
+use traits::PtpNetwork;
 use controller::PtpController;
 use status::SyncStatus;
 use config::SystemConfig;
@@ -206,64 +206,8 @@ impl PtpNetwork for RealPtpNetwork {
     }
 }
 
-// UDP-based PTP network for Windows
-// Using standard UDP sockets instead of pcap eliminates buffering latency.
-// The UDP recv_from() returns immediately when a packet arrives, giving us
-// accurate timestamps via SystemTime::now().
-#[cfg(windows)]
-struct RealPtpNetwork {
-    sock_event: UdpSocket,
-    sock_general: UdpSocket,
-}
-
-#[cfg(windows)]
-impl PtpNetwork for RealPtpNetwork {
-    fn recv_packet(&mut self) -> Result<Option<(Vec<u8>, usize, SystemTime)>> {
-        let mut buf = [0u8; 2048];
-
-        // Check Event Socket (port 319)
-        match self.sock_event.recv_from(&mut buf) {
-            Ok((size, _)) => {
-                let ts = SystemTime::now();
-                return Ok(Some((buf[..size].to_vec(), size, ts)));
-            }
-            Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
-            Err(e) => return Err(e.into()),
-        }
-
-        // Check General Socket (port 320)
-        match self.sock_general.recv_from(&mut buf) {
-            Ok((size, _)) => {
-                let ts = SystemTime::now();
-                return Ok(Some((buf[..size].to_vec(), size, ts)));
-            }
-            Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
-            Err(e) => return Err(e.into()),
-        }
-
-        Ok(None)
-    }
-
-    fn reset(&mut self) -> Result<()> {
-        // Drain buffers to prevent processing old packets after a clock step
-        let mut buf = [0u8; 2048];
-        loop {
-            match self.sock_event.recv_from(&mut buf) {
-                Ok(_) => continue,
-                Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
-                Err(_) => break,
-            }
-        }
-        loop {
-            match self.sock_general.recv_from(&mut buf) {
-                Ok(_) => continue,
-                Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
-                Err(_) => break,
-            }
-        }
-        Ok(())
-    }
-}
+// Windows uses Npcap for precise packet timestamps with HostHighPrec mode
+// See net_pcap::NpcapPtpNetwork - uses KeQuerySystemTimePrecise() for synchronized timestamps
 
 fn stop_conflicting_services() {
     #[cfg(windows)]
@@ -500,16 +444,17 @@ fn run_sync_loop(args: Args, running: Arc<AtomicBool>, system_config: SystemConf
 
     #[cfg(windows)]
     let network = {
-        // Use standard UDP sockets on Windows with multicast join
-        // Note: Npcap timestamps use monotonic clock that doesn't respect clock steps,
-        // making it unsuitable for PTP sync. Socket-based approach provides better results.
-        let sock_event = net::create_multicast_socket(ptp::PTP_EVENT_PORT, iface_ip)?;
-        let sock_general = net::create_multicast_socket(ptp::PTP_GENERAL_PORT, iface_ip)?;
-        info!("Joined multicast groups on {} ({}) using UDP sockets", iface_name, iface_ip);
-
-        RealPtpNetwork {
-            sock_event,
-            sock_general,
+        // Use Npcap with HostHighPrec timestamps (KeQuerySystemTimePrecise)
+        // This provides driver-level timestamps that are both precise AND synced with system time
+        match net_pcap::NpcapPtpNetwork::new(&iface_name) {
+            Ok(npcap_net) => {
+                info!("Using Npcap HostHighPrec timestamps on {} ({})", iface_name, iface_ip);
+                npcap_net
+            }
+            Err(e) => {
+                error!("Failed to initialize Npcap: {}. Npcap is required on Windows.", e);
+                return Err(e);
+            }
         }
     };
     
@@ -691,6 +636,8 @@ fn main() -> Result<()> {
                 .target(target)
                 .filter_level(log::LevelFilter::Info)
                 .format_timestamp_millis()
+                .format_target(false)  // Remove module path from logs
+                .format_level(false)   // Remove INFO/WARN prefix
                 .init();
         } else {
              // Fallback
@@ -701,9 +648,11 @@ fn main() -> Result<()> {
         return run_service_logic(args, config);
     }
 
-    // Console Mode Logging
+    // Console Mode Logging (clean format)
     env_logger::builder()
         .format_timestamp(None)
+        .format_target(false)  // Remove module path
+        .format_level(false)   // Remove INFO/WARN prefix
         .filter_level(log::LevelFilter::Info)
         .init();
 

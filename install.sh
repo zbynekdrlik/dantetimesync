@@ -1,14 +1,15 @@
 #!/bin/bash
 set -e
 
-VERSION="1.1.83"
+# Installer version - the binary version is extracted dynamically from the installed binary
+INSTALLER_VERSION="1.0.0"
 
 if [ "$1" == "--version" ]; then
-    echo "Dante Time Sync Installer v$VERSION"
+    echo "Dante Time Sync Installer v$INSTALLER_VERSION"
     exit 0
 fi
 
-echo ">>> Dante Time Sync Installer v$VERSION <<<"
+echo ">>> Dante Time Sync Installer v$INSTALLER_VERSION <<<"
 
 if [ "$EUID" -ne 0 ]; then
   echo "Error: Please run as root (sudo ./install.sh)"
@@ -89,9 +90,11 @@ systemctl disable ntp 2>/dev/null || true
 
 # 6. Create Systemd Service
 echo ">>> Creating systemd service..."
+# Extract version from installed binary for service description
+BINARY_VERSION=$(/usr/local/bin/dantetimesync --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
 cat <<EOF > /etc/systemd/system/dantetimesync.service
 [Unit]
-Description=Dante PTP Time Sync Service v$VERSION
+Description=Dante PTP Time Sync Service v$BINARY_VERSION
 After=network-online.target
 Wants=network-online.target
 
