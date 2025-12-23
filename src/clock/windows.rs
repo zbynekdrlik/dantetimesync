@@ -224,7 +224,7 @@ impl WindowsClock {
                       wall_time_ns / 1_000_000_000.0, self.last_requested_ppm, observed_ppm, effectiveness * 100.0);
 
                 if effectiveness.abs() < 0.3 && self.last_requested_ppm.abs() > 10.0 {
-                    warn!("[FreqMeasure] LOW EFFECTIVENESS! Frequency adjustment may not be working.");
+                    debug!("[FreqMeasure] LOW EFFECTIVENESS! Frequency adjustment may not be working.");
                 }
 
                 // Reset baseline for next measurement period

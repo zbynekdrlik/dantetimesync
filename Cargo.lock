@@ -552,7 +552,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
 name = "dantetimesync"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
  "byteorder",
