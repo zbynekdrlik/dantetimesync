@@ -352,12 +352,12 @@ mod app {
                         } else if event.id == restart_i.id() {
                             // Restart service using PowerShell (requires elevation)
                             let _ = std::process::Command::new("powershell.exe")
-                                .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Restart-Service \"Dante Time Sync\" -Force'"])
+                                .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Restart-Service dantetimesync -Force'"])
                                 .spawn();
                         } else if event.id == stop_i.id() {
                             // Stop service
                             let _ = std::process::Command::new("powershell.exe")
-                                .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Stop-Service \"Dante Time Sync\" -Force'"])
+                                .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Stop-Service dantetimesync -Force'"])
                                 .spawn();
                         } else if event.id == log_i.id() {
                             let _ = std::process::Command::new("notepad.exe")

@@ -88,10 +88,16 @@ use traits::PtpNetwork;
 use controller::PtpController;
 use status::SyncStatus;
 use config::SystemConfig;
+use serde::{Serialize, Deserialize};
 
-#[derive(serde::Deserialize, serde::Serialize)]
+/// Simplified configuration - only NTP server needs to be managed
+/// All other parameters auto-adjust based on platform defaults
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Config {
     ntp_server: String,
+
+    /// Advanced system tuning (optional - uses auto-optimized defaults if omitted)
+    #[serde(default)]
     system: SystemConfig,
 }
 
@@ -108,18 +114,20 @@ fn load_config() -> Config {
     #[cfg(windows)]
     let path = r"C:\ProgramData\DanteTimeSync\config.json";
     #[cfg(not(windows))]
-    let path = "/etc/dantetimesync/config.json"; 
+    let path = "/etc/dantetimesync/config.json";
 
     if let Ok(content) = std::fs::read_to_string(path) {
-        if let Ok(cfg) = serde_json::from_str(&content) {
+        if let Ok(cfg) = serde_json::from_str::<Config>(&content) {
             return cfg;
         }
     }
-    
+
+    // Create simple config with only ntp_server (system defaults auto-apply)
     let cfg = Config::default();
-    if let Ok(bytes) = serde_json::to_string_pretty(&cfg) {
-        let _ = std::fs::write(path, bytes);
-    }
+    let simple_config = r#"{
+  "ntp_server": "10.77.8.2"
+}"#;
+    let _ = std::fs::write(path, simple_config);
     cfg
 }
 
