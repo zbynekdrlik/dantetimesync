@@ -73,7 +73,7 @@ const P_MAX_NANO_PPM: f64 = 10.0;         // Tiny corrections only
 const I_GAIN_NANO: f64 = 0.005;           // 10x smaller I-term
 const NANO_ENTER_RATE_US: f64 = 0.5;      // Enter NANO if drift < 0.5 µs/s
 const NANO_EXIT_RATE_US: f64 = 1.0;       // Exit NANO if drift > 1.0 µs/s
-const NANO_SUSTAIN_COUNT: usize = 30;     // 30 samples (~30s) to enter NANO
+const NANO_SUSTAIN_COUNT: usize = 15;     // 15 samples (~15s) to enter NANO
 const NANO_DEADBAND_US: f64 = 0.1;        // Ignore drift < 0.1 µs/s (noise floor)
 
 // Max drift baseline limit
@@ -692,9 +692,14 @@ where
         if self.is_locked {
             if abs_rate < NANO_ENTER_RATE_US {
                 self.nano_sustain_count += 1;
+                // Log progress towards NANO every 10 samples
+                if self.nano_sustain_count % 10 == 0 && !self.in_nano_mode {
+                    debug!("[NANO] Sustain count: {}/{}", self.nano_sustain_count, NANO_SUSTAIN_COUNT);
+                }
                 if self.nano_sustain_count >= NANO_SUSTAIN_COUNT && !self.in_nano_mode {
                     self.in_nano_mode = true;
-                    info!("[PTP] === NANO MODE === Ultra-precise servo engaged");
+                    info!("[PTP] === NANO MODE === Ultra-precise servo engaged (after {} samples)",
+                          NANO_SUSTAIN_COUNT);
                 }
             } else if abs_rate > NANO_EXIT_RATE_US {
                 if self.in_nano_mode {
@@ -702,7 +707,14 @@ where
                     self.nano_sustain_count = 0;
                     info!("[PTP] === LOCK MODE === Exiting NANO (drift {:+.2}us/s)", rate_ppm);
                 }
+                // Reset sustain count when we exceed exit threshold (even if not in NANO yet)
+                // This ensures we need 30 CONSECUTIVE samples below threshold
+                if self.nano_sustain_count > 0 {
+                    debug!("[NANO] Reset: drift {:+.2}us/s > exit threshold", abs_rate);
+                    self.nano_sustain_count = 0;
+                }
             }
+            // Between thresholds (0.5-1.0): don't increment but don't reset either
         } else {
             // Not locked - can't be in NANO
             self.in_nano_mode = false;
@@ -770,10 +782,11 @@ where
         let status = if self.in_nano_mode { "NANO" } else if self.is_locked { "LOCK" } else { phase_name };
 
         // User-friendly log: drift rate (stability) and frequency adjustment
-        // NANO mode shows more precision in drift value
+        // NANO mode shows nanoseconds for sub-µs precision visibility
         if self.in_nano_mode {
-            info!("[PTP] {:4}  Drift:{:+6.2}us/s  Adj:{:+6.1}ppm",
-                  status, rate_ppm, total_correction);
+            let drift_ns = rate_ppm * 1000.0;  // Convert µs/s to ns/s
+            info!("[PTP] {:4}  Drift:{:+7.0}ns/s  Adj:{:+6.2}ppm",
+                  status, drift_ns, total_correction);
         } else {
             info!("[PTP] {:4}  Drift:{:+6.1}us/s  Adj:{:+6.1}ppm",
                   status, rate_ppm, total_correction);
