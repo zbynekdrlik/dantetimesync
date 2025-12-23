@@ -65,16 +65,21 @@ const P_MAX_ACQ_PPM: f64 = 200.0;         // Limit to prevent wild swings
 const P_GAIN_PROD: f64 = 0.1;             // Gentle P-term in production
 const P_MAX_PROD_PPM: f64 = 100.0;        // Allow enough for high drift rates
 
-// Phase transition threshold (with hysteresis to prevent hunting)
-const PRODUCTION_ENTER_US: f64 = 40.0;   // Enter production below 40µs
-const PRODUCTION_EXIT_US: f64 = 100.0;   // Exit production above 100µs
+// NANO phase (ultra-precise for sub-µs capable systems)
+// Entry: drift < 0.5 µs/s sustained for 30 samples
+// Exit: drift > 1.0 µs/s for 5 samples (hysteresis)
+const P_GAIN_NANO: f64 = 0.01;            // 10x smaller than PROD - minimize hunting
+const P_MAX_NANO_PPM: f64 = 10.0;         // Tiny corrections only
+const I_GAIN_NANO: f64 = 0.005;           // 10x smaller I-term
+const NANO_ENTER_RATE_US: f64 = 0.5;      // Enter NANO if drift < 0.5 µs/s
+const NANO_EXIT_RATE_US: f64 = 1.0;       // Exit NANO if drift > 1.0 µs/s
+const NANO_SUSTAIN_COUNT: usize = 30;     // 30 samples (~30s) to enter NANO
+const NANO_DEADBAND_US: f64 = 0.1;        // Ignore drift < 0.1 µs/s (noise floor)
 
-// Drift learning - only in production phase
-const DRIFT_LEARN_RATE: f64 = 0.1;        // Learn rate in production (faster for high drift)
+// Max drift baseline limit
 const DRIFT_MAX_PPM: f64 = 500.0;
 
-// Lock detection (aligned with production thresholds)
-const LOCK_OFFSET_THRESHOLD_US: f64 = 100.0;  // Same as PRODUCTION_EXIT_US
+// Lock detection
 const LOCK_STABLE_COUNT: usize = 5;
 
 // Lucky packet filter - minimum time between samples (config override available)
@@ -155,6 +160,10 @@ where
     /// Production mode state (with hysteresis)
     in_production_mode: bool,
 
+    /// NANO mode state (ultra-precise for sub-µs capable systems)
+    in_nano_mode: bool,
+    nano_sustain_count: usize,  // Track consecutive sub-threshold samples
+
     // Rate-of-change tracking for Dante servo
     last_offset_us: Option<f64>,
     last_offset_time: Option<Instant>,
@@ -233,6 +242,8 @@ where
             is_locked: false,
             lock_stable_count: 0,
             in_production_mode: false,
+            in_nano_mode: false,
+            nano_sustain_count: 0,
             last_offset_us: None,
             last_offset_time: None,
             smoothed_rate_ppm: 0.0,
@@ -674,28 +685,60 @@ where
                                 + raw_rate_ppm * RATE_SMOOTH_ALPHA;
         let rate_ppm = self.smoothed_rate_ppm;
 
-        // TWO-PHASE CONTROL based on rate stability, not absolute offset
+        // THREE-PHASE CONTROL: ACQ → PROD → NANO based on rate stability
         let abs_rate = rate_ppm.abs();
-        if abs_rate < 5.0 {  // Rate stable within 5ppm
+
+        // NANO mode transitions (from LOCK state only)
+        if self.is_locked {
+            if abs_rate < NANO_ENTER_RATE_US {
+                self.nano_sustain_count += 1;
+                if self.nano_sustain_count >= NANO_SUSTAIN_COUNT && !self.in_nano_mode {
+                    self.in_nano_mode = true;
+                    info!("[PTP] === NANO MODE === Ultra-precise servo engaged");
+                }
+            } else if abs_rate > NANO_EXIT_RATE_US {
+                if self.in_nano_mode {
+                    self.in_nano_mode = false;
+                    self.nano_sustain_count = 0;
+                    info!("[PTP] === LOCK MODE === Exiting NANO (drift {:+.2}us/s)", rate_ppm);
+                }
+            }
+        } else {
+            // Not locked - can't be in NANO
+            self.in_nano_mode = false;
+            self.nano_sustain_count = 0;
+        }
+
+        // ACQ/PROD transitions
+        if abs_rate < 5.0 {  // Rate stable within 5µs/s
             self.in_production_mode = true;
-        } else if abs_rate > 20.0 {  // Rate unstable above 20ppm
+        } else if abs_rate > 20.0 {  // Rate unstable above 20µs/s
             self.in_production_mode = false;
         }
 
-        let (p_gain, p_max, phase_name) = if self.in_production_mode {
-            (P_GAIN_PROD, P_MAX_PROD_PPM, "PROD")
+        // Select gains based on mode
+        let (p_gain, p_max, i_gain, phase_name) = if self.in_nano_mode {
+            (P_GAIN_NANO, P_MAX_NANO_PPM, I_GAIN_NANO, "NANO")
+        } else if self.in_production_mode {
+            (P_GAIN_PROD, P_MAX_PROD_PPM, 0.05, "PROD")
         } else {
-            (P_GAIN_ACQ, P_MAX_ACQ_PPM, "ACQ")
+            (P_GAIN_ACQ, P_MAX_ACQ_PPM, 0.05, "ACQ")
         };
 
         // P-term: responds to rate of change (not absolute offset!)
+        // NANO mode: apply deadband - don't correct tiny rates (noise)
+        let effective_rate = if self.in_nano_mode && abs_rate < NANO_DEADBAND_US {
+            0.0  // Within deadband, no correction needed
+        } else {
+            rate_ppm
+        };
+
         // Negative rate = clock too slow, need positive adjustment
-        let p_term = (-rate_ppm * p_gain).clamp(-p_max, p_max);
+        let p_term = (-effective_rate * p_gain).clamp(-p_max, p_max);
 
         // I-term: Integrate rate error to learn true drift
-        // This continuously adjusts drift_baseline to eliminate rate error
-        const I_GAIN: f64 = 0.05;  // Slow integration to avoid oscillation
-        let i_term = -rate_ppm * I_GAIN;  // Integrate rate error
+        // Uses mode-appropriate gain
+        let i_term = -effective_rate * i_gain;
         self.drift_baseline_ppm = (self.drift_baseline_ppm + i_term).clamp(-DRIFT_MAX_PPM, DRIFT_MAX_PPM);
 
         // Total correction = drift baseline + P-term
@@ -724,11 +767,17 @@ where
         self.applied_freq_ppm = total_correction;
         let factor = 1.0 + (total_correction / 1_000_000.0);
 
-        let status = if self.is_locked { "LOCK" } else { phase_name };
+        let status = if self.in_nano_mode { "NANO" } else if self.is_locked { "LOCK" } else { phase_name };
 
         // User-friendly log: drift rate (stability) and frequency adjustment
-        info!("[PTP] {:4}  Drift:{:+6.1}us/s  Adj:{:+6.1}ppm",
-              status, rate_ppm, total_correction);
+        // NANO mode shows more precision in drift value
+        if self.in_nano_mode {
+            info!("[PTP] {:4}  Drift:{:+6.2}us/s  Adj:{:+6.1}ppm",
+                  status, rate_ppm, total_correction);
+        } else {
+            info!("[PTP] {:4}  Drift:{:+6.1}us/s  Adj:{:+6.1}ppm",
+                  status, rate_ppm, total_correction);
+        }
 
         if let Err(e) = self.clock.adjust_frequency(factor) {
             warn!("Clock adjustment failed: {}", e);
@@ -756,7 +805,9 @@ where
             // Extended fields for tray app
             status.is_locked = self.is_locked;
             status.smoothed_rate_ppm = self.smoothed_rate_ppm;
-            status.mode = if self.is_locked {
+            status.mode = if self.in_nano_mode {
+                "NANO".to_string()
+            } else if self.is_locked {
                 "LOCK".to_string()
             } else if self.in_production_mode {
                 "PROD".to_string()
@@ -781,6 +832,8 @@ where
         self.is_locked = false;
         self.lock_stable_count = 0;
         self.in_production_mode = false;
+        self.in_nano_mode = false;
+        self.nano_sustain_count = 0;
         self.applied_freq_ppm = 0.0;
         self.last_offset_us = None;
         self.last_offset_time = None;
