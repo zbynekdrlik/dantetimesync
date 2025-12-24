@@ -46,7 +46,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
+          $expectedHash = "dad1f2bf1b02b787be08ca4862f99e39a876c8f274bda1ca9f64d240a41e0d62"
           Invoke-WebRequest -Uri https://npcap.com/dist/npcap-sdk-1.13.zip -OutFile npcap-sdk.zip
+          $actualHash = (Get-FileHash npcap-sdk.zip -Algorithm SHA256).Hash.ToLower()
+          if ($actualHash -ne $expectedHash) {
+            Write-Error "Npcap SDK checksum mismatch! Expected: $expectedHash, Got: $actualHash"
+            exit 1
+          }
+          Write-Host "Npcap SDK checksum verified: $actualHash"
           Expand-Archive npcap-sdk.zip -DestinationPath npcap-sdk
           echo "LIB=$PWD\npcap-sdk\Lib\x64;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 

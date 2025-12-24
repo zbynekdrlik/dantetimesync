@@ -8,8 +8,9 @@ coverage:
         threshold: 2%
     patch:
       default:
-        # New code should have at least 30% coverage (realistic given platform-specific code)
-        target: 30%
+        # New code should have at least 70% coverage
+        # Lower than 100% to account for platform-specific code that can't be tested in CI
+        target: 70%
 
 comment:
   # Show coverage diff in PR comments

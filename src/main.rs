@@ -321,19 +321,21 @@ fn start_ipc_server(status: Arc<RwLock<SyncStatus>>) {
         rt.block_on(async move {
             use tokio::io::AsyncWriteExt;
 
+            // Pre-allocate UTF-16 strings outside loop for performance
+            let pipe_name_wide: Vec<u16> = r"\\.\pipe\dantetimesync"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let sddl_wide: Vec<u16> = "D:(A;;GA;;;WD)"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+
             // Named pipe server loop
             loop {
                 // Create pipe manually with Security Descriptor to allow Users to connect to Service
                 // SDDL: D:(A;;GA;;;WD) -> DACL: Allow Generic All to World (Everyone)
                 // This is needed because Service runs as SYSTEM and Tray runs as User.
-                let pipe_name_wide: Vec<u16> = r"\\.\pipe\dantetimesync"
-                    .encode_utf16()
-                    .chain(std::iter::once(0))
-                    .collect();
-                let sddl_wide: Vec<u16> = "D:(A;;GA;;;WD)"
-                    .encode_utf16()
-                    .chain(std::iter::once(0))
-                    .collect();
 
                 let mut sd = PSECURITY_DESCRIPTOR::default();
                 let mut sa = SECURITY_ATTRIBUTES {
@@ -391,7 +393,14 @@ fn start_ipc_server(status: Arc<RwLock<SyncStatus>>) {
                 };
 
                 if server.connect().await.is_ok() {
-                    let s = { status.read().unwrap().clone() };
+                    // Handle poisoned lock gracefully instead of panicking
+                    let s = match status.read() {
+                        Ok(guard) => guard.clone(),
+                        Err(e) => {
+                            error!("Status lock poisoned: {}. Skipping IPC write.", e);
+                            continue;
+                        }
+                    };
                     if let Ok(bytes) = serde_json::to_vec(&s) {
                         let len = (bytes.len() as u32).to_le_bytes();
                         let _ = server.write_all(&len).await;
