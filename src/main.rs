@@ -170,27 +170,25 @@ impl PtpNetwork for RealPtpNetwork {
     fn recv_packet(&mut self) -> Result<Option<(Vec<u8>, usize, SystemTime)>> {
         let mut buf = [0u8; 2048];
 
-        loop {
-            // Check Event Socket
-            match net::recv_with_timestamp(&self.sock_event, &mut buf) {
-                Ok(Some((size, ts))) => {
-                    return Ok(Some((buf[..size].to_vec(), size, ts)));
-                }
-                Ok(None) => {} // Continue to check general
-                Err(e) => return Err(e),
+        // Check Event Socket first
+        match net::recv_with_timestamp(&self.sock_event, &mut buf) {
+            Ok(Some((size, ts))) => {
+                return Ok(Some((buf[..size].to_vec(), size, ts)));
             }
-
-            // Check General Socket
-            match net::recv_with_timestamp(&self.sock_general, &mut buf) {
-                Ok(Some((size, ts))) => {
-                    return Ok(Some((buf[..size].to_vec(), size, ts)));
-                }
-                Ok(None) => {} // Continue to next iteration
-                Err(e) => return Err(e),
-            }
-
-            return Ok(None);
+            Ok(None) => {} // Continue to check general
+            Err(e) => return Err(e),
         }
+
+        // Check General Socket
+        match net::recv_with_timestamp(&self.sock_general, &mut buf) {
+            Ok(Some((size, ts))) => {
+                return Ok(Some((buf[..size].to_vec(), size, ts)));
+            }
+            Ok(None) => {} // No data on either socket
+            Err(e) => return Err(e),
+        }
+
+        Ok(None)
     }
 
     fn reset(&mut self) -> Result<()> {
