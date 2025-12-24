@@ -203,17 +203,15 @@ mod tests {
 
         for name in &wireless_names {
             let lower = name.to_lowercase();
-            let is_wireless = lower.contains("wireless")
-                || lower.contains("wi-fi")
-                || lower.contains("wlan");
+            let is_wireless =
+                lower.contains("wireless") || lower.contains("wi-fi") || lower.contains("wlan");
             assert!(is_wireless, "{} should be detected as wireless", name);
         }
 
         for name in &wired_names {
             let lower = name.to_lowercase();
-            let is_wireless = lower.contains("wireless")
-                || lower.contains("wi-fi")
-                || lower.contains("wlan");
+            let is_wireless =
+                lower.contains("wireless") || lower.contains("wi-fi") || lower.contains("wlan");
             assert!(!is_wireless, "{} should NOT be detected as wireless", name);
         }
     }
