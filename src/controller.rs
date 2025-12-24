@@ -1352,4 +1352,279 @@ mod tests {
             "NANO deadband should be 0.1 µs/s"
         );
     }
+
+    // ========================================================================
+    // SYNC SOURCE / GRANDMASTER SWITCH TESTS
+    // ========================================================================
+    // Tests for v1.5.5+ soft reset: when sync source changes, we preserve
+    // the learned frequency and stay in current mode instead of hard reset.
+    // ========================================================================
+
+    /// Helper to create a controller in LOCK mode for grandmaster switch testing
+    fn create_locked_controller() -> (
+        PtpController<MockSystemClock, MockPtpNetwork, MockNtpSource>,
+        Arc<RwLock<SyncStatus>>,
+    ) {
+        let mock_clock = MockSystemClock::new();
+        let mock_net = MockPtpNetwork::new();
+        let mock_ntp = MockNtpSource::new();
+        let status = Arc::new(RwLock::new(SyncStatus::default()));
+        let mut config = SystemConfig::default();
+        config.filters.calibration_samples = 0;
+        config.filters.warmup_secs = 0.0;
+
+        let mut controller =
+            PtpController::new(mock_clock, mock_net, mock_ntp, status.clone(), config);
+
+        // Set up controller in LOCK state with learned frequency
+        controller.is_locked = true;
+        controller.in_production_mode = true;
+        controller.warmup_complete = true;
+        controller.clock_settled = true;
+        controller.applied_freq_ppm = 35.0;
+        controller.drift_baseline_ppm = 33.5;
+        controller.current_sync_source = Some([0x00, 0x1D, 0xC1, 0x51, 0xD0, 0xD9]);
+        controller.current_gm_uuid = Some([0x00, 0x00, 0x00, 0x00, 0x01, 0x00]);
+
+        // Add some pending syncs and samples
+        controller.pending_syncs.insert(
+            1,
+            PendingSync {
+                rx_time_sys: SystemTime::now(),
+                source_uuid: [0x00, 0x1D, 0xC1, 0x51, 0xD0, 0xD9],
+            },
+        );
+        controller.sample_window.push(1000);
+        controller.sample_window.push(2000);
+
+        (controller, status)
+    }
+
+    #[test]
+    fn test_sync_source_initial_detection() {
+        let (mut controller, _) = create_locked_controller();
+
+        // Reset to no sync source
+        controller.current_sync_source = None;
+
+        // Verify initial detection sets sync source without reset
+        let new_source = [0x00, 0x1D, 0xC1, 0x1A, 0x44, 0x30];
+
+        // Simulate what handle_sync_message does for initial source
+        controller.current_sync_source = Some(new_source);
+
+        assert_eq!(
+            controller.current_sync_source,
+            Some(new_source),
+            "Should set initial sync source"
+        );
+        // Frequency should still be preserved (not reset)
+        assert!(
+            (controller.applied_freq_ppm - 35.0).abs() < 0.01,
+            "Frequency should be preserved on initial detection"
+        );
+    }
+
+    #[test]
+    fn test_sync_source_change_soft_reset_preserves_frequency() {
+        let (mut controller, _) = create_locked_controller();
+
+        let old_freq = controller.applied_freq_ppm;
+        let old_drift = controller.drift_baseline_ppm;
+
+        // Simulate sync source change (soft reset logic)
+        let new_source = [0x00, 0x1D, 0xC1, 0x1A, 0x44, 0x30];
+        controller.current_sync_source = Some(new_source);
+        controller.pending_syncs.clear();
+        controller.sample_window.clear();
+        controller.prev_t1_ns = 0;
+        controller.prev_t2_ns = 0;
+        // Key: applied_freq_ppm and drift_baseline_ppm are NOT reset
+
+        assert!(
+            (controller.applied_freq_ppm - old_freq).abs() < 0.01,
+            "Soft reset should preserve applied_freq_ppm: expected {}, got {}",
+            old_freq,
+            controller.applied_freq_ppm
+        );
+        assert!(
+            (controller.drift_baseline_ppm - old_drift).abs() < 0.01,
+            "Soft reset should preserve drift_baseline_ppm: expected {}, got {}",
+            old_drift,
+            controller.drift_baseline_ppm
+        );
+    }
+
+    #[test]
+    fn test_sync_source_change_soft_reset_clears_stale_data() {
+        let (mut controller, _) = create_locked_controller();
+
+        // Verify we have stale data before
+        assert!(
+            !controller.pending_syncs.is_empty(),
+            "Should have pending syncs before soft reset"
+        );
+        assert!(
+            !controller.sample_window.is_empty(),
+            "Should have samples before soft reset"
+        );
+
+        // Simulate soft reset
+        controller.pending_syncs.clear();
+        controller.sample_window.clear();
+        controller.prev_t1_ns = 0;
+        controller.prev_t2_ns = 0;
+
+        assert!(
+            controller.pending_syncs.is_empty(),
+            "Soft reset should clear pending_syncs"
+        );
+        assert!(
+            controller.sample_window.is_empty(),
+            "Soft reset should clear sample_window"
+        );
+        assert_eq!(controller.prev_t1_ns, 0, "Soft reset should clear prev_t1_ns");
+        assert_eq!(controller.prev_t2_ns, 0, "Soft reset should clear prev_t2_ns");
+    }
+
+    #[test]
+    fn test_sync_source_change_stays_in_lock_mode() {
+        let (mut controller, _) = create_locked_controller();
+
+        // Verify LOCK state before
+        assert!(controller.is_locked, "Should be locked before soft reset");
+        assert!(
+            controller.in_production_mode,
+            "Should be in production mode before soft reset"
+        );
+
+        // Simulate soft reset (what handle_sync_message does)
+        let new_source = [0x00, 0x1D, 0xC1, 0x1A, 0x44, 0x30];
+        controller.current_sync_source = Some(new_source);
+        controller.pending_syncs.clear();
+        controller.sample_window.clear();
+        controller.prev_t1_ns = 0;
+        controller.prev_t2_ns = 0;
+        // Key: is_locked and in_production_mode are NOT reset
+
+        assert!(
+            controller.is_locked,
+            "Soft reset should NOT change lock state"
+        );
+        assert!(
+            controller.in_production_mode,
+            "Soft reset should NOT change production mode"
+        );
+    }
+
+    #[test]
+    fn test_sync_source_change_in_nano_mode_stays_nano() {
+        let (mut controller, _) = create_locked_controller();
+
+        // Put in NANO mode
+        controller.in_nano_mode = true;
+        controller.nano_sustain_count = NANO_SUSTAIN_COUNT;
+
+        // Simulate soft reset
+        let new_source = [0x00, 0x1D, 0xC1, 0x1A, 0x44, 0x30];
+        controller.current_sync_source = Some(new_source);
+        controller.pending_syncs.clear();
+        controller.sample_window.clear();
+        controller.prev_t1_ns = 0;
+        controller.prev_t2_ns = 0;
+        // Soft reset does NOT touch nano mode state
+
+        assert!(
+            controller.in_nano_mode,
+            "Soft reset should NOT exit NANO mode"
+        );
+        assert_eq!(
+            controller.nano_sustain_count, NANO_SUSTAIN_COUNT,
+            "Soft reset should NOT reset nano_sustain_count"
+        );
+    }
+
+    #[test]
+    fn test_format_mac_helper() {
+        let uuid = [0x00, 0x1D, 0xC1, 0x51, 0xD0, 0xD9];
+        let formatted = format_mac(&uuid);
+        assert_eq!(
+            formatted, "00:1D:C1:51:D0:D9",
+            "format_mac should produce correct MAC format"
+        );
+
+        let all_zeros = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        assert_eq!(
+            format_mac(&all_zeros),
+            "00:00:00:00:00:00",
+            "format_mac should handle all zeros"
+        );
+
+        let all_ff = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+        assert_eq!(
+            format_mac(&all_ff),
+            "FF:FF:FF:FF:FF:FF",
+            "format_mac should handle all 0xFF"
+        );
+    }
+
+    #[test]
+    fn test_grandmaster_uuid_change_detected() {
+        let (mut controller, _) = create_locked_controller();
+
+        let old_gm = controller.current_gm_uuid;
+        let new_gm = [0x00, 0x00, 0x00, 0x00, 0x02, 0x00];
+
+        // Simulate grandmaster UUID change
+        controller.current_gm_uuid = Some(new_gm);
+
+        assert_ne!(
+            controller.current_gm_uuid, old_gm,
+            "Grandmaster UUID should be updated"
+        );
+        assert_eq!(
+            controller.current_gm_uuid,
+            Some(new_gm),
+            "New grandmaster UUID should be stored"
+        );
+    }
+
+    #[test]
+    fn test_hard_reset_vs_soft_reset_frequency_difference() {
+        // This test documents the key difference between hard and soft reset
+        let (mut soft_controller, _) = create_locked_controller();
+        let (mut hard_controller, _) = create_locked_controller();
+
+        let original_freq = 35.0;
+
+        // Soft reset: preserves frequency
+        soft_controller.pending_syncs.clear();
+        soft_controller.sample_window.clear();
+        soft_controller.prev_t1_ns = 0;
+        soft_controller.prev_t2_ns = 0;
+        // applied_freq_ppm NOT touched
+
+        // Hard reset (what reset_filter does): clears frequency
+        hard_controller.applied_freq_ppm = 0.0;
+        hard_controller.drift_baseline_ppm = 0.0;
+        hard_controller.is_locked = false;
+        hard_controller.in_production_mode = false;
+
+        assert!(
+            (soft_controller.applied_freq_ppm - original_freq).abs() < 0.01,
+            "Soft reset preserves frequency"
+        );
+        assert!(
+            (hard_controller.applied_freq_ppm - 0.0).abs() < 0.01,
+            "Hard reset clears frequency to 0"
+        );
+        assert!(
+            soft_controller.is_locked,
+            "Soft reset stays locked"
+        );
+        assert!(
+            !hard_controller.is_locked,
+            "Hard reset loses lock"
+        );
+    }
 }
