@@ -3,13 +3,44 @@
 
 $ErrorActionPreference = "Stop"
 
+$InstallerVersion = "1.6.2"
 $RepoOwner = "zbynekdrlik"
 $RepoName = "dantetimesync"
 $InstallDir = "C:\Program Files\DanteTimeSync"
 $ServiceName = "dantetimesync"
 $DataDir = "C:\ProgramData\DanteTimeSync"
 
-Write-Host ">>> Dante Time Sync Windows Installer <<<" -ForegroundColor Cyan
+Write-Host ""
+Write-Host ">>> Dante Time Sync Windows Installer v$InstallerVersion <<<" -ForegroundColor Cyan
+Write-Host ""
+
+# Check for Administrator privileges
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $isAdmin) {
+    Write-Host "Administrator privileges required. Attempting to elevate..." -ForegroundColor Yellow
+
+    # Try to self-elevate
+    try {
+        $scriptUrl = "https://raw.githubusercontent.com/$RepoOwner/$RepoName/master/install.ps1"
+        $elevatedCmd = "irm '$scriptUrl' | iex"
+        Start-Process powershell.exe -Verb RunAs -ArgumentList "-ExecutionPolicy Bypass -Command `"$elevatedCmd`""
+        Write-Host "Elevated process started. Please continue in the new window." -ForegroundColor Green
+        exit 0
+    } catch {
+        Write-Host ""
+        Write-Host "========================================" -ForegroundColor Red
+        Write-Host "  Administrator privileges required!" -ForegroundColor Red
+        Write-Host "========================================" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please run PowerShell as Administrator:" -ForegroundColor Yellow
+        Write-Host "  1. Right-click PowerShell" -ForegroundColor White
+        Write-Host "  2. Select 'Run as administrator'" -ForegroundColor White
+        Write-Host "  3. Run the install command again" -ForegroundColor White
+        Write-Host ""
+        exit 1
+    }
+}
 
 # 1. Check for Npcap/WinPcap (Required for High Precision)
 function Test-NpcapInstalled {
@@ -409,16 +440,19 @@ if (!(Test-NpcapInstalled)) {
     # Download Npcap installer
     $NpcapVersion = "1.85"
     $NpcapUrl = "https://npcap.com/dist/npcap-$NpcapVersion.exe"
-    $NpcapInstaller = "$env:TEMP\npcap-$NpcapVersion.exe"
+    $RandomId = Get-Random -Minimum 10000 -Maximum 99999
+    $NpcapInstaller = "$env:TEMP\npcap-$NpcapVersion-$RandomId.exe"
 
     Write-Host "Downloading Npcap $NpcapVersion..." -ForegroundColor Cyan
     try {
-        Invoke-WebRequest -Uri $NpcapUrl -OutFile $NpcapInstaller
+        # Use -UseBasicParsing for better compatibility
+        Invoke-WebRequest -Uri $NpcapUrl -OutFile $NpcapInstaller -UseBasicParsing
         Write-Host "  Downloaded to: $NpcapInstaller" -ForegroundColor Gray
     } catch {
         Write-Host ""
         Write-Host "========================================" -ForegroundColor Red
         Write-Host "  Failed to download Npcap installer!" -ForegroundColor Red
+        Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host "========================================" -ForegroundColor Red
         Write-Host ""
         Write-Host "Please install Npcap manually:" -ForegroundColor Cyan
