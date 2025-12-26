@@ -6,7 +6,7 @@ The following nodes must be updated and verified after every successful CI/CD ru
 
 | Hostname | IP | OS | User | Password | Status |
 |---|---|---|---|---|---|
-| develbox | 10.77.9.21 | Linux | newlevel | - | v1.5.5 |
+| develbox | 10.77.9.21 | Linux | newlevel | - | v1.5.6 |
 | iem | 10.77.9.231 | Windows | iem | iem | v1.5.5 |
 | ableton-foh | 10.77.9.230 | Windows | ableton-foh | newlevel | v1.5.5 |
 | mbc.lan | 10.77.9.232 | Windows | newlevel | newlevel | v1.5.6 (USB NIC) |
