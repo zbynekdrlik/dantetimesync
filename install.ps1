@@ -37,12 +37,20 @@ function Install-NpcapInteractive {
     # This function runs the actual GUI automation - must be called from interactive session
     param([string]$InstallerPath)
 
+    Write-Host "    Loading UI Automation..." -ForegroundColor Gray
+
     # Load UIAutomation assemblies
-    Add-Type -AssemblyName UIAutomationClient
-    Add-Type -AssemblyName UIAutomationTypes
+    try {
+        Add-Type -AssemblyName UIAutomationClient
+        Add-Type -AssemblyName UIAutomationTypes
+    } catch {
+        Write-Host "    ERROR: Failed to load UIAutomation" -ForegroundColor Red
+        return $false
+    }
 
     # Add mouse click helper using Windows API
-    Add-Type @"
+    try {
+        Add-Type @"
         using System;
         using System.Runtime.InteropServices;
         public class NpcapMouseHelper {
@@ -59,9 +67,12 @@ function Install-NpcapInteractive {
             }
         }
 "@ -ErrorAction SilentlyContinue
+    } catch {
+        # Type may already exist from previous run
+    }
 
     function Find-NpcapWindow {
-        param([int]$TimeoutSeconds = 30)
+        param([int]$TimeoutSeconds = 10)
         $rootElement = [System.Windows.Automation.AutomationElement]::RootElement
         $condition = New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -97,42 +108,63 @@ function Install-NpcapInteractive {
                     $x = [int]($rect.X + $rect.Width / 2)
                     $y = [int]($rect.Y + $rect.Height / 2)
                     [NpcapMouseHelper]::Click($x, $y)
+                    Write-Host "    Clicked: $name" -ForegroundColor Gray
                     Start-Sleep -Milliseconds 500
                     return $true
-                } catch { }
+                } catch {
+                    Write-Host "    Click failed: $name" -ForegroundColor Red
+                }
             }
         }
         return $false
     }
 
     # Kill any existing Npcap installer processes
+    Write-Host "    Killing existing Npcap processes..." -ForegroundColor Gray
     Get-Process | Where-Object { $_.Name -like "*npcap*" } | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
 
     # Start installer with pre-selected options
+    Write-Host "    Starting Npcap installer..." -ForegroundColor Gray
     $installerArgs = "/winpcap_mode=yes /loopback_support=no /dot11_support=no /vlan_support=no /admin_only=no /disable_restore_point=yes"
     $process = Start-Process -FilePath $InstallerPath -ArgumentList $installerArgs -PassThru
     Start-Sleep -Seconds 2
 
-    # Step 1: Click "I Agree"
-    $window = Find-NpcapWindow -TimeoutSeconds 30
-    if (-not $window) { return $false }
+    # Step 1: Click "I Agree" (fast timeout - 10 seconds)
+    Write-Host "    Waiting for installer window..." -ForegroundColor Gray
+    $window = Find-NpcapWindow -TimeoutSeconds 10
+    if (-not $window) {
+        Write-Host "    ERROR: Installer window not found!" -ForegroundColor Red
+        return $false
+    }
+    Write-Host "    Found installer window, clicking I Agree..." -ForegroundColor Gray
     Start-Sleep -Milliseconds 500
-    if (-not (Click-NpcapButton -Window $window -ButtonName "I Agree")) { return $false }
+    if (-not (Click-NpcapButton -Window $window -ButtonName "I Agree")) {
+        Write-Host "    ERROR: Failed to click I Agree button!" -ForegroundColor Red
+        return $false
+    }
 
     # Step 2: Click "Install"
     Start-Sleep -Seconds 1
-    $window = Find-NpcapWindow -TimeoutSeconds 10
-    if ($window) { Click-NpcapButton -Window $window -ButtonName "Install" | Out-Null }
+    Write-Host "    Clicking Install..." -ForegroundColor Gray
+    $window = Find-NpcapWindow -TimeoutSeconds 5
+    if ($window) {
+        if (-not (Click-NpcapButton -Window $window -ButtonName "Install")) {
+            Write-Host "    ERROR: Failed to click Install button!" -ForegroundColor Red
+            return $false
+        }
+    }
 
-    # Step 3: Wait for driver installation
-    Start-Sleep -Seconds 20
+    # Step 3: Wait for driver installation (with progress)
+    Write-Host "    Installing drivers (this takes ~15-20 seconds)..." -ForegroundColor Gray
+    Start-Sleep -Seconds 15
 
-    # Step 4: Click through all remaining screens (Next, Finish, Close)
-    $maxWait = 90
+    # Step 4: Click through remaining screens (fast - max 30 seconds total)
+    Write-Host "    Finishing installation..." -ForegroundColor Gray
+    $maxWait = 30
     $waited = 0
     while ($waited -lt $maxWait) {
-        $window = Find-NpcapWindow -TimeoutSeconds 3
+        $window = Find-NpcapWindow -TimeoutSeconds 2
         if (-not $window) { break }  # Window closed = done
 
         # Try clicking any forward/finish button
@@ -142,15 +174,19 @@ function Install-NpcapInteractive {
 
         if ($clicked) {
             Start-Sleep -Seconds 1
+            $waited += 1
         } else {
             Start-Sleep -Seconds 2
             $waited += 2
         }
     }
 
-    # Ensure process exits
-    if (-not $process.HasExited) { $process.WaitForExit(10000) }
-    Start-Sleep -Seconds 2
+    # Ensure process exits (short timeout)
+    if (-not $process.HasExited) {
+        Write-Host "    Waiting for installer to exit..." -ForegroundColor Gray
+        $process.WaitForExit(5000)
+    }
+    Start-Sleep -Seconds 1
 
     # Verify installation
     $packetDll = Test-Path "C:\Windows\System32\Packet.dll"
@@ -367,91 +403,58 @@ try {
 
 if (!(Test-NpcapInstalled)) {
     Write-Host ""
-    Write-Host "========================================" -ForegroundColor Red
-    Write-Host "  Npcap is NOT installed!" -ForegroundColor Red
-    Write-Host "========================================" -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Npcap is REQUIRED for high-precision PTP time synchronization." -ForegroundColor Yellow
-    Write-Host "The free version of Npcap does not support silent installation." -ForegroundColor Gray
+    Write-Host "Npcap is not installed - attempting automatic installation..." -ForegroundColor Yellow
     Write-Host ""
 
+    # Download Npcap installer
     $NpcapVersion = "1.85"
     $NpcapUrl = "https://npcap.com/dist/npcap-$NpcapVersion.exe"
-    $NpcapPath = "$env:TEMP\npcap-$NpcapVersion.exe"
+    $NpcapInstaller = "$env:TEMP\npcap-$NpcapVersion.exe"
 
-    # Check if running interactively or via SSH/remote
-    $isInteractive = Test-InteractiveSession
-
-    if ($isInteractive) {
-        # Ask user what they want to do
-        Write-Host "Options:" -ForegroundColor Cyan
-        Write-Host "  [1] Attempt automated installation (downloads Npcap, tries to click through GUI)"
-        Write-Host "  [2] Open Npcap download page (manual installation)"
-        Write-Host "  [3] Abort installation"
+    Write-Host "Downloading Npcap $NpcapVersion..." -ForegroundColor Cyan
+    try {
+        Invoke-WebRequest -Uri $NpcapUrl -OutFile $NpcapInstaller
+        Write-Host "  Downloaded to: $NpcapInstaller" -ForegroundColor Gray
+    } catch {
         Write-Host ""
-
-        $choice = Read-Host "Enter choice (1/2/3)"
-    } else {
-        # Running via SSH - auto-select automated installation
-        Write-Host "Detected non-interactive session (SSH/remote)" -ForegroundColor Yellow
-        Write-Host "Automatically attempting Npcap installation..." -ForegroundColor Cyan
-        $choice = "1"
-    }
-
-    switch ($choice) {
-        "1" {
-            Write-Host ""
-            Write-Host "Downloading Npcap $NpcapVersion..." -ForegroundColor Cyan
-            try {
-                Invoke-WebRequest -Uri $NpcapUrl -OutFile $NpcapPath
-                Write-Host "Downloaded to: $NpcapPath" -ForegroundColor Gray
-
-                $success = Install-NpcapWithAutomation -InstallerPath $NpcapPath
-
-                if ($success) {
-                    Write-Host "Npcap installed successfully!" -ForegroundColor Green
-                } else {
-                    Write-Host ""
-                    Write-Host "Npcap installation could not be verified." -ForegroundColor Red
-                    Write-Host "The installer may still be running - please complete it manually." -ForegroundColor Yellow
-                    Write-Host ""
-                    Write-Host "After installing Npcap, run this installer again." -ForegroundColor Cyan
-                    if ($isInteractive) { Read-Host "Press Enter to exit" }
-                    exit 1
-                }
-            } catch {
-                Write-Error "Failed to download Npcap: $_"
-                Write-Host "Please download manually from: $NpcapUrl" -ForegroundColor Yellow
-                if ($isInteractive) { Read-Host "Press Enter to exit" }
-                exit 1
-            }
-        }
-        "2" {
-            Write-Host ""
-            Write-Host "Opening Npcap download page..." -ForegroundColor Cyan
-            Start-Process "https://npcap.com/#download"
-            Write-Host ""
-            Write-Host "After installing Npcap, run this installer again." -ForegroundColor Yellow
-            if ($isInteractive) { Read-Host "Press Enter to exit" }
-            exit 1
-        }
-        default {
-            Write-Host ""
-            Write-Host "Installation aborted." -ForegroundColor Yellow
-            exit 1
-        }
-    }
-
-    # Final verification
-    if (!(Test-NpcapInstalled)) {
+        Write-Host "========================================" -ForegroundColor Red
+        Write-Host "  Failed to download Npcap installer!" -ForegroundColor Red
+        Write-Host "========================================" -ForegroundColor Red
         Write-Host ""
-        Write-Host "ERROR: Npcap is still not detected after installation attempt." -ForegroundColor Red
-        Write-Host "Please install Npcap manually from: $NpcapUrl" -ForegroundColor Yellow
-        Write-Host "Then run this installer again." -ForegroundColor Yellow
-        if ($isInteractive) { Read-Host "Press Enter to exit" }
+        Write-Host "Please install Npcap manually:" -ForegroundColor Cyan
+        Write-Host "  1. Download from: https://npcap.com/dist/npcap-1.85.exe" -ForegroundColor White
+        Write-Host "  2. Run the installer and click through the dialogs" -ForegroundColor White
+        Write-Host "  3. Run this installer again" -ForegroundColor White
+        Write-Host ""
         exit 1
     }
 
+    # Attempt automated installation
+    $installSuccess = Install-NpcapWithAutomation -InstallerPath $NpcapInstaller
+
+    # Clean up installer
+    Remove-Item $NpcapInstaller -Force -ErrorAction SilentlyContinue
+
+    # Verify installation
+    Start-Sleep -Seconds 2
+    if (!(Test-NpcapInstalled)) {
+        Write-Host ""
+        Write-Host "========================================" -ForegroundColor Red
+        Write-Host "  Npcap installation failed!" -ForegroundColor Red
+        Write-Host "========================================" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "The automated installation did not complete successfully." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Please install Npcap manually:" -ForegroundColor Cyan
+        Write-Host "  1. Download from: https://npcap.com/dist/npcap-1.85.exe" -ForegroundColor White
+        Write-Host "  2. Run the installer and click through the dialogs" -ForegroundColor White
+        Write-Host "  3. Run this installer again" -ForegroundColor White
+        Write-Host ""
+        exit 1
+    }
+
+    Write-Host ""
+    Write-Host "Npcap installed successfully!" -ForegroundColor Green
     Write-Host ""
 }
 
