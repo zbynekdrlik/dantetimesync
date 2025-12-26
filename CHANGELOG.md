@@ -5,6 +5,22 @@ All notable changes to DanteTimeSync will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2025-12-26
+
+### Added
+- PTP offline detection: graceful fallback to NTP-only sync when PTP masters are unavailable
+- Orange tray icon for NTP-only mode (PTP offline)
+- Toast notifications for PTP offline/restored transitions
+- NTP failure tracking with tray notifications when NTP server is unreachable
+- Windows Add/Remove Programs registration in installer
+- Unit tests for PTP offline detection
+
+### Changed
+- Tightened NTP step threshold from 2000µs to 500µs for better UTC alignment
+
+### Fixed
+- Application no longer hangs when PTP Dante masters are switched off
+
 ## [1.5.5] - 2024-12-24
 
 ### Added

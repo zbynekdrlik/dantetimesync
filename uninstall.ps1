@@ -33,6 +33,16 @@ try {
     Write-Host "  - Removed machine-wide registry entry." -ForegroundColor Gray
 } catch { }
 
+# 3b. Remove Add/Remove Programs registry entry
+Write-Host "Removing from Add/Remove Programs..."
+$UninstallKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\DanteTimeSync"
+try {
+    if (Test-Path $UninstallKey) {
+        Remove-Item -Path $UninstallKey -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  - Removed from Add/Remove Programs" -ForegroundColor Gray
+    }
+} catch { }
+
 # 4. Stop and remove service
 Write-Host "Stopping service..."
 $Service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue

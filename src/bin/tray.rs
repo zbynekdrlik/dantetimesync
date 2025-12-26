@@ -88,6 +88,8 @@ mod app {
         pub ntp_offset_us: i64,
         #[serde(default)]
         pub mode: String,
+        #[serde(default)]
+        pub ntp_failed: bool,
     }
 
     #[derive(Debug)]
@@ -115,6 +117,8 @@ mod app {
         was_locked: bool,
         was_nano: bool,
         was_online: bool,
+        was_ptp_offline: bool,
+        was_ntp_failed: bool,
         first_update: bool,
     }
 
@@ -238,6 +242,7 @@ mod app {
         let red_icon = generate_icon(220, 53, 69); // Danger Red - Offline
         let green_icon = generate_icon(40, 167, 69); // Success Green - Locked
         let yellow_icon = generate_icon(255, 193, 7); // Warning Yellow - Acquiring
+        let orange_icon = generate_icon(255, 152, 0); // Orange - NTP-only mode (PTP offline)
         let cyan_icon = generate_icon(0, 188, 212); // Cyan - NANO mode (ultra-precise)
 
         // Wrap in RefCell so we can explicitly drop it on exit to clean up tray icon
@@ -319,28 +324,53 @@ mod app {
                                 let mut state = notification_state.borrow_mut();
 
                                 let is_nano = status.mode == "NANO";
+                                let is_ptp_offline = status.mode == "NTP-only";
 
                                 // Check for state changes (skip first update)
                                 if !state.first_update {
-                                    // NANO mode transitions
-                                    if is_nano && !state.was_nano {
+                                    // NTP failure transitions (critical)
+                                    if status.ntp_failed && !state.was_ntp_failed {
+                                        show_notification(
+                                            "Dante Time Sync",
+                                            "NTP server unreachable"
+                                        );
+                                    } else if !status.ntp_failed && state.was_ntp_failed {
+                                        show_notification(
+                                            "Dante Time Sync",
+                                            "NTP connection restored"
+                                        );
+                                    }
+                                    // PTP offline transitions (highest priority)
+                                    else if is_ptp_offline && !state.was_ptp_offline {
+                                        show_notification(
+                                            "Dante Time Sync",
+                                            "PTP offline - running NTP-only sync"
+                                        );
+                                    } else if !is_ptp_offline && state.was_ptp_offline {
+                                        show_notification(
+                                            "Dante Time Sync",
+                                            "PTP restored - resuming PTP sync"
+                                        );
+                                    }
+                                    // NANO mode transitions (only when PTP is online)
+                                    else if is_nano && !state.was_nano {
                                         show_notification(
                                             "Dante Time Sync",
                                             "NANO mode - ultra-precise sync achieved"
                                         );
-                                    } else if !is_nano && state.was_nano {
+                                    } else if !is_nano && state.was_nano && !is_ptp_offline {
                                         show_notification(
                                             "Dante Time Sync",
                                             "Exited NANO mode"
                                         );
                                     }
-                                    // Lock state changes (only if not NANO transition)
-                                    else if status.is_locked && !state.was_locked {
+                                    // Lock state changes (only if not NANO or PTP offline transition)
+                                    else if status.is_locked && !state.was_locked && !is_ptp_offline {
                                         show_notification(
                                             "Dante Time Sync",
                                             "Frequency locked - sync achieved"
                                         );
-                                    } else if !status.is_locked && state.was_locked && !is_nano {
+                                    } else if !status.is_locked && state.was_locked && !is_nano && !is_ptp_offline {
                                         show_notification(
                                             "Dante Time Sync",
                                             "Lock lost - reacquiring..."
@@ -358,6 +388,8 @@ mod app {
 
                                 state.was_locked = status.is_locked;
                                 state.was_nano = is_nano;
+                                state.was_ptp_offline = is_ptp_offline;
+                                state.was_ntp_failed = status.ntp_failed;
                                 state.was_online = true;
                                 state.first_update = false;
                             }
@@ -371,7 +403,11 @@ mod app {
                             let pulse_intensity = (status.smoothed_rate_ppm.abs() / 20.0).min(1.0) as f32;
 
                             let is_nano = status.mode == "NANO";
-                            let icon = if is_nano {
+                            let is_ptp_offline = status.mode == "NTP-only";
+                            let icon = if is_ptp_offline {
+                                // PTP offline: Orange - running NTP-only sync
+                                orange_icon.clone()
+                            } else if is_nano {
                                 // NANO mode: Cyan - ultra-precise sync
                                 // Very small pulse since drift is minimal in NANO
                                 let nano_pulse = (status.smoothed_rate_ppm.abs() / 5.0).min(1.0) as f32;

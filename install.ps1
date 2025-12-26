@@ -219,6 +219,45 @@ if (Test-Path $TrayPath) {
     }
 }
 
+# 9. Register in Add/Remove Programs (Windows "Installed Apps")
+Write-Host "Registering in Windows Installed Apps..."
+$UninstallKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\DanteTimeSync"
+
+# Get version from executable
+$FileVersion = $Version -replace '^v', ''  # Remove 'v' prefix if present
+
+try {
+    if (!(Test-Path $UninstallKey)) {
+        New-Item -Path $UninstallKey -Force | Out-Null
+    }
+
+    Set-ItemProperty -Path $UninstallKey -Name "DisplayName" -Value "Dante Time Sync"
+    Set-ItemProperty -Path $UninstallKey -Name "DisplayVersion" -Value $FileVersion
+    Set-ItemProperty -Path $UninstallKey -Name "Publisher" -Value "Zbyněk Drlík"
+    Set-ItemProperty -Path $UninstallKey -Name "InstallLocation" -Value $InstallDir
+    Set-ItemProperty -Path $UninstallKey -Name "DisplayIcon" -Value "$TrayPath,0"
+    Set-ItemProperty -Path $UninstallKey -Name "UninstallString" -Value "powershell -ExecutionPolicy Bypass -File `"$InstallDir\uninstall.ps1`""
+    Set-ItemProperty -Path $UninstallKey -Name "NoModify" -Value 1 -Type DWord
+    Set-ItemProperty -Path $UninstallKey -Name "NoRepair" -Value 1 -Type DWord
+    Set-ItemProperty -Path $UninstallKey -Name "EstimatedSize" -Value 5120 -Type DWord  # ~5MB in KB
+
+    Write-Host "  - Registered in Add/Remove Programs" -ForegroundColor Gray
+} catch {
+    Write-Warning "Failed to register in Add/Remove Programs: $_"
+}
+
+# Copy uninstall script to install directory
+$UninstallScriptSource = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "uninstall.ps1"
+$UninstallScriptDest = "$InstallDir\uninstall.ps1"
+if (Test-Path $UninstallScriptSource) {
+    try {
+        Copy-Item -Path $UninstallScriptSource -Destination $UninstallScriptDest -Force
+        Write-Host "  - Uninstall script copied to $InstallDir" -ForegroundColor Gray
+    } catch {
+        Write-Warning "Failed to copy uninstall script: $_"
+    }
+}
+
 Write-Host "Installation Complete!" -ForegroundColor Green
 Write-Host "Service '$ServiceName' is running."
 Write-Host "Logs available at: $DataDir\dantetimesync.log" -ForegroundColor Gray

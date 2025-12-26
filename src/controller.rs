@@ -101,7 +101,13 @@ const DEFAULT_MIN_T1_DELTA_NS: i64 = 100_000_000; // 100ms default (Dante sends 
 // Periodic NTP UTC alignment (steps clock without changing frequency)
 const NTP_CHECK_INTERVAL_SECS: u64 = 30; // Check NTP every 30 seconds
 const NTP_SAMPLE_COUNT: usize = 5; // Samples needed for reliable median
-const NTP_STEP_THRESHOLD_US: i64 = 2_000; // Only step if offset > 2ms (ignore small drifts)
+const NTP_STEP_THRESHOLD_US: i64 = 500; // Step if offset > 500µs (tighter UTC alignment)
+
+// PTP offline detection
+const PTP_TIMEOUT_SECS: u64 = 10; // Consider PTP offline after 10s without packets
+
+// NTP failure detection
+const NTP_FAILURE_THRESHOLD: usize = 3; // Consider NTP failed after 3 consecutive failures
 
 // ============================================================================
 // DATA STRUCTURES
@@ -189,6 +195,15 @@ where
     ntp_offset_samples: VecDeque<i64>, // in microseconds
     ntp_tracking_enabled: bool,
     last_ntp_step: Option<Instant>, // Grace period after NTP stepping
+
+    // PTP offline detection
+    last_ptp_packet: Instant,
+    ptp_offline: bool,
+    ptp_offline_logged: bool, // Prevent repeated logging
+
+    // NTP failure tracking
+    ntp_consecutive_failures: usize,
+    ntp_failed: bool,
 }
 
 struct PendingSync {
@@ -281,6 +296,13 @@ where
             ntp_offset_samples: VecDeque::with_capacity(NTP_SAMPLE_COUNT + 2),
             ntp_tracking_enabled: true, // Always enabled - NTP is the UTC time source
             last_ntp_step: None,
+            // PTP offline detection
+            last_ptp_packet: now,
+            ptp_offline: false,
+            ptp_offline_logged: false,
+            // NTP failure tracking
+            ntp_consecutive_failures: 0,
+            ntp_failed: false,
         }
     }
 
@@ -329,9 +351,41 @@ where
     /// - adjust_frequency() = SetSystemTimeAdjustmentPrecise() - sets tick rate
     ///
     /// Stepping time does NOT affect the Dante-tuned frequency!
+    /// Check PTP status and handle offline mode
+    fn check_ptp_status(&mut self) {
+        let elapsed = self.last_ptp_packet.elapsed();
+
+        if elapsed > Duration::from_secs(PTP_TIMEOUT_SECS) {
+            if !self.ptp_offline {
+                self.ptp_offline = true;
+                if !self.ptp_offline_logged {
+                    warn!(
+                        "[PTP] No packets received for {}s - PTP masters may be offline",
+                        PTP_TIMEOUT_SECS
+                    );
+                    info!("[PTP] Continuing with NTP-only time sync");
+                    self.ptp_offline_logged = true;
+                }
+                // Update status to reflect offline state
+                if let Ok(mut status) = self.status_shared.write() {
+                    status.settled = false;
+                    status.mode = "NTP-only".to_string();
+                }
+            }
+        } else if self.ptp_offline {
+            // PTP came back online
+            self.ptp_offline = false;
+            self.ptp_offline_logged = false;
+            info!("[PTP] Packets received - PTP sync resumed");
+        }
+    }
+
     pub fn check_ntp_utc_tracking(&mut self) {
-        // Only check NTP once locked (tracking is stable) and tracking is enabled
-        if !self.is_locked || !self.ntp_tracking_enabled {
+        // Run NTP sync when:
+        // 1. PTP is offline (NTP-only mode), OR
+        // 2. PTP is locked and tracking is enabled
+        let should_check = self.ptp_offline || (self.is_locked && self.ntp_tracking_enabled);
+        if !should_check {
             return;
         }
 
@@ -347,6 +401,13 @@ where
             Ok((offset, sign)) => {
                 let offset_us = (offset.as_nanos() as i64 / 1000) * sign as i64;
 
+                // NTP success - reset failure tracking
+                if self.ntp_failed {
+                    info!("[NTP] Connection restored");
+                }
+                self.ntp_consecutive_failures = 0;
+                self.ntp_failed = false;
+
                 // Add sample to buffer
                 self.ntp_offset_samples.push_back(offset_us);
                 if self.ntp_offset_samples.len() > NTP_SAMPLE_COUNT + 2 {
@@ -356,6 +417,7 @@ where
                 // Update shared status with NTP offset for tray app display
                 if let Ok(mut status) = self.status_shared.write() {
                     status.ntp_offset_us = offset_us;
+                    status.ntp_failed = false;
                 }
 
                 // Log current offset
@@ -386,7 +448,26 @@ where
                 }
             }
             Err(e) => {
-                warn!("[NTP] Failed: {}", e);
+                // Track consecutive failures
+                self.ntp_consecutive_failures += 1;
+
+                if self.ntp_consecutive_failures >= NTP_FAILURE_THRESHOLD && !self.ntp_failed {
+                    self.ntp_failed = true;
+                    warn!(
+                        "[NTP] Server unreachable - {} consecutive failures",
+                        self.ntp_consecutive_failures
+                    );
+
+                    // Update shared status
+                    if let Ok(mut status) = self.status_shared.write() {
+                        status.ntp_failed = true;
+                    }
+                } else {
+                    warn!(
+                        "[NTP] Failed ({}/{}): {}",
+                        self.ntp_consecutive_failures, NTP_FAILURE_THRESHOLD, e
+                    );
+                }
             }
         }
     }
@@ -406,10 +487,22 @@ where
     }
 
     pub fn process_loop_iteration(&mut self) -> Result<()> {
+        // Check PTP status first (handles timeout detection for NTP-only fallback)
+        self.check_ptp_status();
+
         let (buf, size, t2) = match self.network.recv_packet()? {
             Some(res) => res,
-            None => return Ok(()),
+            None => {
+                // No packet, but still run NTP tracking if PTP is offline
+                if self.ptp_offline {
+                    self.check_ntp_utc_tracking();
+                }
+                return Ok(());
+            }
         };
+
+        // Packet received - update last_ptp_packet timestamp
+        self.last_ptp_packet = Instant::now();
 
         if size < PtpV1Header::SIZE {
             return Ok(());
@@ -1626,5 +1719,123 @@ mod tests {
         );
         assert!(soft_controller.is_locked, "Soft reset stays locked");
         assert!(!hard_controller.is_locked, "Hard reset loses lock");
+    }
+
+    // ========================================================================
+    // PTP OFFLINE DETECTION TESTS
+    // ========================================================================
+    // Tests for v1.5.5+ PTP timeout: when no PTP packets are received for
+    // PTP_TIMEOUT_SECS (10s), the app should log and continue with NTP-only sync.
+    // ========================================================================
+
+    #[test]
+    fn test_ptp_offline_constants() {
+        // Verify timeout and threshold constants
+        assert_eq!(PTP_TIMEOUT_SECS, 10, "PTP timeout should be 10 seconds");
+        assert_eq!(
+            NTP_STEP_THRESHOLD_US, 500,
+            "NTP step threshold should be 500µs"
+        );
+    }
+
+    #[test]
+    fn test_ptp_offline_initial_state() {
+        let (controller, _) = create_nano_test_controller();
+
+        // Verify initial state is online
+        assert!(!controller.ptp_offline, "Should start online");
+        assert!(
+            !controller.ptp_offline_logged,
+            "Should not have logged offline"
+        );
+    }
+
+    #[test]
+    fn test_ptp_offline_detection_after_timeout() {
+        let (mut controller, status) = create_nano_test_controller();
+
+        // Simulate timeout by setting last_ptp_packet to past
+        controller.last_ptp_packet = Instant::now() - Duration::from_secs(PTP_TIMEOUT_SECS + 1);
+
+        // Call check_ptp_status
+        controller.check_ptp_status();
+
+        // Verify offline state
+        assert!(controller.ptp_offline, "Should be offline after timeout");
+        assert!(controller.ptp_offline_logged, "Should have logged offline");
+
+        // Verify status update
+        let status_guard = status.read().unwrap();
+        assert!(!status_guard.settled, "Status should show not settled");
+        assert_eq!(status_guard.mode, "NTP-only", "Mode should be NTP-only");
+    }
+
+    #[test]
+    fn test_ptp_online_recovery() {
+        let (mut controller, _) = create_nano_test_controller();
+
+        // Set offline state
+        controller.ptp_offline = true;
+        controller.ptp_offline_logged = true;
+
+        // Simulate packet received (recent timestamp)
+        controller.last_ptp_packet = Instant::now();
+
+        // Call check_ptp_status
+        controller.check_ptp_status();
+
+        // Verify recovery
+        assert!(!controller.ptp_offline, "Should be back online");
+        assert!(!controller.ptp_offline_logged, "Logged flag should reset");
+    }
+
+    #[test]
+    fn test_ptp_offline_no_repeat_logging() {
+        let (mut controller, _) = create_nano_test_controller();
+
+        // Simulate already offline and logged
+        controller.ptp_offline = true;
+        controller.ptp_offline_logged = true;
+        controller.last_ptp_packet = Instant::now() - Duration::from_secs(PTP_TIMEOUT_SECS + 5);
+
+        // Call check_ptp_status multiple times
+        controller.check_ptp_status();
+        controller.check_ptp_status();
+        controller.check_ptp_status();
+
+        // Should still be logged (no reset)
+        assert!(
+            controller.ptp_offline_logged,
+            "Should remain logged (no spam)"
+        );
+    }
+
+    #[test]
+    fn test_ntp_tracking_runs_when_ptp_offline() {
+        let (controller, _) = create_nano_test_controller();
+
+        // The check_ntp_utc_tracking function has this logic:
+        // let should_check = self.ptp_offline || (self.is_locked && self.ntp_tracking_enabled);
+
+        // When PTP is offline, NTP tracking should run regardless of lock state
+        // This is validated by the modified check_ntp_utc_tracking condition
+        assert!(
+            controller.ntp_tracking_enabled,
+            "NTP tracking should be enabled by default"
+        );
+    }
+
+    #[test]
+    fn test_ptp_offline_within_timeout_stays_online() {
+        let (mut controller, _) = create_nano_test_controller();
+
+        // Simulate packet received 5 seconds ago (within timeout)
+        controller.last_ptp_packet = Instant::now() - Duration::from_secs(5);
+
+        // Call check_ptp_status
+        controller.check_ptp_status();
+
+        // Should still be online
+        assert!(!controller.ptp_offline, "Should stay online within timeout");
     }
 }

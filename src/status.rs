@@ -42,9 +42,12 @@ pub struct SyncStatus {
     /// Used for NTP status display in tray menu
     pub ntp_offset_us: i64,
 
-    /// Current operating mode: "ACQ" (acquiring), "PROD" (production), "LOCK" (locked)
+    /// Current operating mode: "ACQ" (acquiring), "PROD" (production), "LOCK" (locked), "NTP-only"
     /// Used for status display and icon state
     pub mode: String,
+
+    /// True when NTP sync has failed (can't reach server)
+    pub ntp_failed: bool,
 }
 
 impl Default for SyncStatus {
@@ -62,6 +65,7 @@ impl Default for SyncStatus {
             smoothed_rate_ppm: 0.0,
             ntp_offset_us: 0,
             mode: "ACQ".to_string(),
+            ntp_failed: false,
         }
     }
 }
