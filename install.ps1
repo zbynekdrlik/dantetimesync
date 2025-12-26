@@ -374,14 +374,24 @@ if (!(Test-NpcapInstalled)) {
     $NpcapUrl = "https://npcap.com/dist/npcap-$NpcapVersion.exe"
     $NpcapPath = "$env:TEMP\npcap-$NpcapVersion.exe"
 
-    # Ask user what they want to do
-    Write-Host "Options:" -ForegroundColor Cyan
-    Write-Host "  [1] Attempt automated installation (downloads Npcap, tries to click through GUI)"
-    Write-Host "  [2] Open Npcap download page (manual installation)"
-    Write-Host "  [3] Abort installation"
-    Write-Host ""
+    # Check if running interactively or via SSH/remote
+    $isInteractive = Test-InteractiveSession
 
-    $choice = Read-Host "Enter choice (1/2/3)"
+    if ($isInteractive) {
+        # Ask user what they want to do
+        Write-Host "Options:" -ForegroundColor Cyan
+        Write-Host "  [1] Attempt automated installation (downloads Npcap, tries to click through GUI)"
+        Write-Host "  [2] Open Npcap download page (manual installation)"
+        Write-Host "  [3] Abort installation"
+        Write-Host ""
+
+        $choice = Read-Host "Enter choice (1/2/3)"
+    } else {
+        # Running via SSH - auto-select automated installation
+        Write-Host "Detected non-interactive session (SSH/remote)" -ForegroundColor Yellow
+        Write-Host "Automatically attempting Npcap installation..." -ForegroundColor Cyan
+        $choice = "1"
+    }
 
     switch ($choice) {
         "1" {
@@ -401,13 +411,13 @@ if (!(Test-NpcapInstalled)) {
                     Write-Host "The installer may still be running - please complete it manually." -ForegroundColor Yellow
                     Write-Host ""
                     Write-Host "After installing Npcap, run this installer again." -ForegroundColor Cyan
-                    Read-Host "Press Enter to exit"
+                    if ($isInteractive) { Read-Host "Press Enter to exit" }
                     exit 1
                 }
             } catch {
                 Write-Error "Failed to download Npcap: $_"
                 Write-Host "Please download manually from: $NpcapUrl" -ForegroundColor Yellow
-                Read-Host "Press Enter to exit"
+                if ($isInteractive) { Read-Host "Press Enter to exit" }
                 exit 1
             }
         }
@@ -417,7 +427,7 @@ if (!(Test-NpcapInstalled)) {
             Start-Process "https://npcap.com/#download"
             Write-Host ""
             Write-Host "After installing Npcap, run this installer again." -ForegroundColor Yellow
-            Read-Host "Press Enter to exit"
+            if ($isInteractive) { Read-Host "Press Enter to exit" }
             exit 1
         }
         default {
@@ -433,7 +443,7 @@ if (!(Test-NpcapInstalled)) {
         Write-Host "ERROR: Npcap is still not detected after installation attempt." -ForegroundColor Red
         Write-Host "Please install Npcap manually from: $NpcapUrl" -ForegroundColor Yellow
         Write-Host "Then run this installer again." -ForegroundColor Yellow
-        Read-Host "Press Enter to exit"
+        if ($isInteractive) { Read-Host "Press Enter to exit" }
         exit 1
     }
 
