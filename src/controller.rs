@@ -469,8 +469,8 @@ where
                         self.last_offset_time = None;
                         // Clear spike filter to prevent false positives from step transient
                         self.spike_filter.clear();
-                        // Clear jitter estimator to restart jitter measurement after step
-                        self.jitter_estimator.clear();
+                        // NOTE: jitter_estimator is NOT cleared on NTP step because
+                        // jitter is a hardware property that persists across steps
                         info!("[NTP] Stepped {:+}us", step_us);
                     }
                 }
