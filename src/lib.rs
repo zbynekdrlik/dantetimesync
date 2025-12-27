@@ -4,6 +4,7 @@ pub mod controller;
 pub mod net;
 pub mod ntp;
 pub mod ptp;
+pub mod spike_filter;
 pub mod status;
 pub mod traits;
 

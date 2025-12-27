@@ -12,6 +12,7 @@
 use crate::clock::SystemClock;
 use crate::config::SystemConfig;
 use crate::ptp::{PtpV1Control, PtpV1FollowUpBody, PtpV1Header, PtpV1SyncMessageBody};
+use crate::spike_filter::{FilterMode, SpikeFilter};
 use crate::status::SyncStatus;
 use crate::traits::{NtpSource, PtpNetwork};
 use anyhow::Result;
@@ -204,6 +205,15 @@ where
     // NTP failure tracking
     ntp_consecutive_failures: usize,
     ntp_failed: bool,
+
+    // ==========================================================================
+    // ADAPTIVE SPIKE DETECTION
+    // ==========================================================================
+    // Robust outlier detection using MAD (Median Absolute Deviation)
+    // Auto-adapts to each computer's noise profile
+    // ==========================================================================
+    /// Spike filter for rejecting timestamp noise spikes
+    spike_filter: SpikeFilter,
 }
 
 struct PendingSync {
@@ -303,6 +313,8 @@ where
             // NTP failure tracking
             ntp_consecutive_failures: 0,
             ntp_failed: false,
+            // Adaptive spike detection
+            spike_filter: SpikeFilter::new(),
         }
     }
 
@@ -443,6 +455,8 @@ where
                         // Reset drift tracking to avoid false spike from step
                         self.last_offset_us = None;
                         self.last_offset_time = None;
+                        // Clear spike filter to prevent false positives from step transient
+                        self.spike_filter.clear();
                         info!("[NTP] Stepped {:+}us", step_us);
                     }
                 }
@@ -867,10 +881,50 @@ where
         self.last_offset_us = Some(offset_us);
         self.last_offset_time = Some(now);
 
-        // Smooth rate with exponential moving average
+        // =======================================================================
+        // ADAPTIVE SPIKE DETECTION
+        // =======================================================================
+        // Filter raw rate through MAD-based outlier detector.
+        // Uses current mode for threshold selection (stricter in LOCK/NANO).
+        // Spikes from timestamp jitter are replaced with median of window.
+        // =======================================================================
+        let filter_mode = if self.in_nano_mode {
+            FilterMode::Nano
+        } else if self.is_locked {
+            FilterMode::Lock
+        } else if self.in_production_mode {
+            FilterMode::Prod
+        } else {
+            FilterMode::Acq
+        };
+
+        let filter_result = self.spike_filter.filter(raw_rate_ppm, filter_mode);
+        let filtered_rate_ppm = filter_result.value;
+
+        // Log when spike is detected and rejected
+        if filter_result.is_spike {
+            info!(
+                "[Spike] REJECTED {:+.1}us/s (dev={:.1}, thresh={:.1}, median={:.1})",
+                raw_rate_ppm,
+                filter_result.deviation,
+                filter_result.threshold,
+                filter_result.median
+            );
+        }
+
+        // Log spike statistics periodically (every 100 samples)
+        let (total, rejected, ratio) = self.spike_filter.stats();
+        if total > 0 && total % 100 == 0 {
+            debug!(
+                "[Spike] Stats: {}/{} rejected ({:.1}%), MAD={:.2}",
+                rejected, total, ratio, filter_result.mad
+            );
+        }
+
+        // Smooth rate with exponential moving average (on FILTERED rate)
         const RATE_SMOOTH_ALPHA: f64 = 0.3; // Higher = more responsive
-        self.smoothed_rate_ppm =
-            self.smoothed_rate_ppm * (1.0 - RATE_SMOOTH_ALPHA) + raw_rate_ppm * RATE_SMOOTH_ALPHA;
+        self.smoothed_rate_ppm = self.smoothed_rate_ppm * (1.0 - RATE_SMOOTH_ALPHA)
+            + filtered_rate_ppm * RATE_SMOOTH_ALPHA;
         let rate_ppm = self.smoothed_rate_ppm;
 
         // THREE-PHASE CONTROL: ACQ → PROD → NANO based on rate stability
@@ -1084,6 +1138,8 @@ where
         self.last_offset_us = None;
         self.last_offset_time = None;
         self.smoothed_rate_ppm = 0.0;
+        // Clear spike filter history
+        self.spike_filter.clear();
 
         // Reset NTP tracking
         self.ntp_offset_samples.clear();
