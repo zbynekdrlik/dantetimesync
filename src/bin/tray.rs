@@ -375,8 +375,17 @@ mod app {
                                     break;
                                 }
 
-                                if let Ok(status) = serde_json::from_slice::<SyncStatus>(&buf) {
-                                    let _ = proxy.send_event(AppEvent::Update(status));
+                                match serde_json::from_slice::<SyncStatus>(&buf) {
+                                    Ok(status) => {
+                                        let _ = proxy.send_event(AppEvent::Update(status));
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "Failed to parse IPC status: {} (len={})",
+                                            e,
+                                            buf.len()
+                                        );
+                                    }
                                 }
                             }
                             // Connection closed by server (one-shot). Sleep before reconnecting to prevent UI freeze.

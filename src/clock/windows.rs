@@ -192,7 +192,7 @@ impl WindowsClock {
     }
 
     /// Measure current clock rate vs wall clock and log detailed diagnostics
-    fn measure_and_log_effectiveness(&mut self, _requested_ppm: f64) {
+    fn measure_and_log_effectiveness(&mut self) {
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_measurement_time);
 
@@ -309,7 +309,7 @@ impl SystemClock for WindowsClock {
         self.last_requested_ppm = ppm;
 
         // Periodic effectiveness measurement
-        self.measure_and_log_effectiveness(ppm);
+        self.measure_and_log_effectiveness();
 
         Ok(())
     }

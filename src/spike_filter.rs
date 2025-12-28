@@ -28,6 +28,31 @@
 use log::debug;
 use std::collections::VecDeque;
 
+// ============================================================================
+// SPIKE FILTER CONSTANTS
+// ============================================================================
+// k values based on robust statistics (MAD multipliers):
+// k=3: catches 99% of Gaussian outliers
+// We use higher values to be conservative and only reject clear spikes
+
+/// ACQ mode: Permissive threshold to allow fast convergence
+const K_ACQ: f64 = 4.0;
+/// PROD mode: Balanced protection
+const K_PROD: f64 = 5.0;
+/// LOCK mode: Strict threshold to protect locked state
+const K_LOCK: f64 = 6.0;
+/// NANO mode: Very strict threshold for ultra-stable operation
+const K_NANO: f64 = 8.0;
+
+/// Default rolling window size (~20 seconds at 1 sample/sec)
+const DEFAULT_WINDOW_SIZE: usize = 20;
+/// Minimum MAD floor to prevent over-sensitivity on ultra-stable systems (µs/s)
+const MIN_MAD_FLOOR: f64 = 0.5;
+/// Minimum samples before spike detection activates
+const WARMUP_SAMPLES: usize = 5;
+/// Accept as real step change after this many consecutive "spikes"
+const MAX_CONSECUTIVE_SPIKES: usize = 5;
+
 /// Operating mode for threshold selection
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FilterMode {
@@ -111,23 +136,19 @@ impl SpikeFilter {
     /// - Mode-dependent k values for appropriate sensitivity
     pub fn new() -> Self {
         Self {
-            rate_history: VecDeque::with_capacity(25),
-            window_size: 20,
+            rate_history: VecDeque::with_capacity(DEFAULT_WINDOW_SIZE + 5),
+            window_size: DEFAULT_WINDOW_SIZE,
 
-            // k values based on robust statistics:
-            // k=3: catches 99% of Gaussian outliers
-            // We use higher values because we want to be conservative
-            // and only reject clear spikes, not normal variation
-            k_acq: 4.0,  // Permissive: allow fast convergence
-            k_prod: 5.0, // Balanced: moderate protection
-            k_lock: 6.0, // Strict: protect locked state
-            k_nano: 8.0, // Very strict: ultra-stable mode
+            k_acq: K_ACQ,
+            k_prod: K_PROD,
+            k_lock: K_LOCK,
+            k_nano: K_NANO,
 
-            min_mad: 0.5,      // Minimum MAD floor (µs/s)
-            warmup_samples: 5, // Need at least 5 samples
+            min_mad: MIN_MAD_FLOOR,
+            warmup_samples: WARMUP_SAMPLES,
 
             consecutive_spikes: 0,
-            max_consecutive_spikes: 5, // Accept after 5 consecutive "spikes"
+            max_consecutive_spikes: MAX_CONSECUTIVE_SPIKES,
 
             total_samples: 0,
             rejected_spikes: 0,
@@ -141,7 +162,7 @@ impl SpikeFilter {
     /// Create a spike filter with custom window size
     pub fn with_window_size(window_size: usize) -> Self {
         let mut filter = Self::new();
-        filter.window_size = window_size.max(5); // Minimum 5 for valid statistics
+        filter.window_size = window_size.max(WARMUP_SAMPLES); // Minimum for valid statistics
         filter.rate_history = VecDeque::with_capacity(window_size + 5);
         filter
     }
@@ -461,9 +482,9 @@ mod tests {
     #[test]
     fn test_new_filter_defaults() {
         let filter = SpikeFilter::new();
-        assert_eq!(filter.window_size, 20);
-        assert_eq!(filter.warmup_samples, 5);
-        assert!((filter.min_mad - 0.5).abs() < 0.01);
+        assert_eq!(filter.window_size, DEFAULT_WINDOW_SIZE);
+        assert_eq!(filter.warmup_samples, WARMUP_SAMPLES);
+        assert!((filter.min_mad - MIN_MAD_FLOOR).abs() < 0.01);
         assert_eq!(filter.rate_history.len(), 0);
     }
 
@@ -847,7 +868,7 @@ mod tests {
 
         // Minimum window size is 5
         let filter_small = SpikeFilter::with_window_size(3);
-        assert_eq!(filter_small.window_size, 5);
+        assert_eq!(filter_small.window_size, WARMUP_SAMPLES); // Minimum enforced
     }
 
     // ========================================================================
