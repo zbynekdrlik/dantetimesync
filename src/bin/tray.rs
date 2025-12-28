@@ -380,7 +380,11 @@ mod app {
                                         let _ = proxy.send_event(AppEvent::Update(status));
                                     }
                                     Err(e) => {
-                                        eprintln!("Failed to parse IPC status: {} (len={})", e, buf.len());
+                                        eprintln!(
+                                            "Failed to parse IPC status: {} (len={})",
+                                            e,
+                                            buf.len()
+                                        );
                                     }
                                 }
                             }
