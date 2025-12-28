@@ -682,7 +682,25 @@ if (Test-Path $TrayPath) {
     }
 }
 
-# 9. Register in Add/Remove Programs (Windows "Installed Apps")
+# 9. Add to Start Menu (makes it easy to find and launch)
+Write-Host "Adding to Start Menu..."
+try {
+    $StartMenuPath = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs"
+    $ShortcutPath = "$StartMenuPath\Dante Time Sync.lnk"
+
+    $WshShell = New-Object -ComObject WScript.Shell
+    $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
+    $Shortcut.TargetPath = $TrayPath
+    $Shortcut.Description = "Dante Time Sync - Tray Application"
+    $Shortcut.WorkingDirectory = $InstallDir
+    $Shortcut.Save()
+
+    Write-Host "  - Added 'Dante Time Sync' to Start Menu" -ForegroundColor Gray
+} catch {
+    Write-Warning "Failed to add Start Menu shortcut: $_"
+}
+
+# 10. Register in Add/Remove Programs (Windows "Installed Apps")
 Write-Host "Registering in Windows Installed Apps..."
 $UninstallKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\DanteTimeSync"
 

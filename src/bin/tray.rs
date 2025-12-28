@@ -177,12 +177,19 @@ mod app {
     }
 
     // ========================================================================
-    // ICON GENERATION - Dynamic with pulsing ring support
+    // ICON GENERATION - Dynamic with pulsing ring and update badge support
     // ========================================================================
 
-    /// Generate an icon with optional pulsing ring intensity
+    /// Generate an icon with optional pulsing ring and update badge
     /// pulse_intensity: 0.0 = no ring, 1.0 = full ring (based on drift rate)
-    fn generate_icon_with_ring(r: u8, g: u8, b: u8, pulse_intensity: f32) -> Icon {
+    /// show_update_badge: if true, shows orange dot in top-right corner
+    fn generate_icon_full(
+        r: u8,
+        g: u8,
+        b: u8,
+        pulse_intensity: f32,
+        show_update_badge: bool,
+    ) -> Icon {
         let width = 32;
         let height = 32;
         let mut rgba = Vec::with_capacity((width * height * 4) as usize);
@@ -193,13 +200,33 @@ mod app {
         let outer_radius = 15.0;
         let ring_width = outer_radius - inner_radius;
 
+        // Update badge: small orange dot in top-right corner
+        let badge_cx = 25.0;
+        let badge_cy = 7.0;
+        let badge_radius = 5.0;
+
         for y in 0..height {
             for x in 0..width {
                 let dx = x as f32 - cx + 0.5;
                 let dy = y as f32 - cy + 0.5;
                 let dist = (dx * dx + dy * dy).sqrt();
 
-                if dist <= inner_radius {
+                // Check if pixel is in update badge area (takes priority)
+                let badge_dx = x as f32 - badge_cx + 0.5;
+                let badge_dy = y as f32 - badge_cy + 0.5;
+                let badge_dist = (badge_dx * badge_dx + badge_dy * badge_dy).sqrt();
+
+                if show_update_badge && badge_dist <= badge_radius {
+                    // Update badge - orange/amber color with anti-aliasing
+                    let mut alpha = 255u8;
+                    if badge_dist > badge_radius - 1.0 {
+                        alpha = ((badge_radius - badge_dist) * 255.0).max(0.0) as u8;
+                    }
+                    rgba.push(255); // R - orange
+                    rgba.push(152); // G
+                    rgba.push(0); // B
+                    rgba.push(alpha);
+                } else if dist <= inner_radius {
                     // Main fill - solid color
                     let mut alpha = 255u8;
                     if dist > inner_radius - 1.0 {
@@ -234,9 +261,14 @@ mod app {
         Icon::from_rgba(rgba, width, height).unwrap()
     }
 
-    /// Generate static icon (no ring)
+    /// Generate icon with optional ring (no badge)
+    fn generate_icon_with_ring(r: u8, g: u8, b: u8, pulse_intensity: f32) -> Icon {
+        generate_icon_full(r, g, b, pulse_intensity, false)
+    }
+
+    /// Generate static icon (no ring, no badge)
     fn generate_icon(r: u8, g: u8, b: u8) -> Icon {
-        generate_icon_with_ring(r, g, b, 0.0)
+        generate_icon_full(r, g, b, 0.0, false)
     }
 
     // ========================================================================
@@ -506,33 +538,27 @@ mod app {
                             // Higher drift rate = more visible ring
                             let pulse_intensity = (status.smoothed_rate_ppm.abs() / 20.0).min(1.0) as f32;
 
+                            // Check if update is available for badge
+                            let has_update = update_available.load(Ordering::Relaxed);
+
                             let is_nano = status.mode == "NANO";
                             let is_ptp_offline = status.mode == "NTP-only";
                             let icon = if is_ptp_offline {
                                 // PTP offline: Orange - running NTP-only sync
-                                orange_icon.clone()
+                                generate_icon_full(255, 152, 0, 0.0, has_update)
                             } else if is_nano {
                                 // NANO mode: Cyan - ultra-precise sync
-                                // Very small pulse since drift is minimal in NANO
                                 let nano_pulse = (status.smoothed_rate_ppm.abs() / 5.0).min(1.0) as f32;
-                                if nano_pulse > 0.1 {
-                                    generate_icon_with_ring(0, 188, 212, nano_pulse)
-                                } else {
-                                    cyan_icon.clone()
-                                }
+                                generate_icon_full(0, 188, 212, nano_pulse, has_update)
                             } else if status.is_locked {
                                 // Locked: Green with optional ring if there's drift
-                                if pulse_intensity > 0.1 {
-                                    generate_icon_with_ring(40, 167, 69, pulse_intensity)
-                                } else {
-                                    green_icon.clone()
-                                }
+                                generate_icon_full(40, 167, 69, pulse_intensity, has_update)
                             } else if status.settled {
                                 // Settled but not locked: Yellow with ring
-                                generate_icon_with_ring(255, 193, 7, pulse_intensity.max(0.3))
+                                generate_icon_full(255, 193, 7, pulse_intensity.max(0.3), has_update)
                             } else {
                                 // Not settled: Yellow (connecting)
-                                yellow_icon.clone()
+                                generate_icon_full(255, 193, 7, 0.0, has_update)
                             };
 
                             // ================================================
@@ -580,8 +606,12 @@ mod app {
                                 state.was_locked = false;
                             }
 
+                            // Check if update is available for badge
+                            let has_update = update_available.load(Ordering::Relaxed);
+                            let offline_icon = generate_icon_full(220, 53, 69, 0.0, has_update);
+
                             if let Some(ref ti) = *tray_icon.borrow() {
-                                let _ = ti.set_icon(Some(red_icon.clone()));
+                                let _ = ti.set_icon(Some(offline_icon));
                                 let _ = ti.set_tooltip(Some(format!("Dante Time Sync v{}\nService Offline", version)));
                             }
                             status_i.set_text("Service Offline".to_string());

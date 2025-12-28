@@ -33,7 +33,17 @@ try {
     Write-Host "  - Removed machine-wide registry entry." -ForegroundColor Gray
 } catch { }
 
-# 3b. Remove Add/Remove Programs registry entry
+# 3b. Remove Start Menu shortcut
+Write-Host "Removing Start Menu shortcut..."
+$StartMenuShortcut = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Dante Time Sync.lnk"
+try {
+    if (Test-Path $StartMenuShortcut) {
+        Remove-Item -Path $StartMenuShortcut -Force -ErrorAction SilentlyContinue
+        Write-Host "  - Removed Start Menu shortcut" -ForegroundColor Gray
+    }
+} catch { }
+
+# 3c. Remove Add/Remove Programs registry entry
 Write-Host "Removing from Add/Remove Programs..."
 $UninstallKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\DanteTimeSync"
 try {
