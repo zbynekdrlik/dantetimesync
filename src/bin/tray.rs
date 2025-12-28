@@ -267,7 +267,7 @@ mod app {
 
         // Service control
         let restart_i = MenuItem::new("Restart Service", true, None);
-        let stop_i = MenuItem::new("Stop Service", true, None);
+        let start_stop_i = MenuItem::new("Stop Service", true, None);
 
         // Utilities
         let log_i = MenuItem::new("Open Log File", true, None);
@@ -285,7 +285,7 @@ mod app {
         menu.append(&tray_icon::menu::PredefinedMenuItem::separator())
             .unwrap();
         menu.append(&restart_i).unwrap();
-        menu.append(&stop_i).unwrap();
+        menu.append(&start_stop_i).unwrap();
         menu.append(&tray_icon::menu::PredefinedMenuItem::separator())
             .unwrap();
         menu.append(&log_i).unwrap();
@@ -562,6 +562,9 @@ mod app {
                             }
                             status_i.set_text(status_text);
                             mode_i.set_text(mode_text);
+                            // Service is running - show Stop option
+                            start_stop_i.set_text("Stop Service".to_string());
+                            restart_i.set_enabled(true);
                         }
                         AppEvent::Offline => {
                             // Check if we were online before
@@ -583,6 +586,9 @@ mod app {
                             }
                             status_i.set_text("Service Offline".to_string());
                             mode_i.set_text("--".to_string());
+                            // Service is stopped - show Start option
+                            start_stop_i.set_text("Start Service".to_string());
+                            restart_i.set_enabled(false);
                         }
                         AppEvent::NewVersionAvailable(new_version) => {
                             // Update menu item text to show available version
@@ -607,11 +613,20 @@ mod app {
                             let _ = std::process::Command::new("powershell.exe")
                                 .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Restart-Service dantetimesync -Force'"])
                                 .spawn();
-                        } else if event.id == stop_i.id() {
-                            // Stop service
-                            let _ = std::process::Command::new("powershell.exe")
-                                .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Stop-Service dantetimesync -Force'"])
-                                .spawn();
+                        } else if event.id == start_stop_i.id() {
+                            // Start or Stop service based on current state
+                            let is_online = notification_state.borrow().was_online;
+                            if is_online {
+                                // Service running - stop it
+                                let _ = std::process::Command::new("powershell.exe")
+                                    .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Stop-Service dantetimesync -Force'"])
+                                    .spawn();
+                            } else {
+                                // Service stopped - start it
+                                let _ = std::process::Command::new("powershell.exe")
+                                    .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Start-Service dantetimesync'"])
+                                    .spawn();
+                            }
                         } else if event.id == log_i.id() {
                             let _ = std::process::Command::new("notepad.exe")
                                 .arg(r"C:\ProgramData\DanteTimeSync\dantetimesync.log")
