@@ -16,6 +16,39 @@ env:
 
 jobs:
   # ============================================================================
+  # Version Consistency Check
+  # ============================================================================
+  version-check:
+    name: Version Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for hardcoded versions in scripts
+        run: |
+          # Extract version from Cargo.toml (single source of truth)
+          CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "Cargo.toml version: $CARGO_VERSION"
+
+          # Check that install.ps1 does NOT contain hardcoded app version patterns
+          # (version should come from GitHub API, not hardcoded)
+          # Allow: $NpcapVersion (dependency versions)
+          # Forbid: $InstallerVersion, $AppVersion, $Version (app-level versions)
+          if grep -E '\$(Installer|App)?Version\s*=\s*"[0-9]+\.[0-9]+' install.ps1; then
+            echo "ERROR: install.ps1 contains hardcoded application version!"
+            echo "Version must come from Cargo.toml via GitHub release API"
+            exit 1
+          fi
+
+          # Check that uninstall.ps1 does NOT contain hardcoded app versions
+          if grep -E '\$(Installer|App)?Version\s*=\s*"[0-9]+\.[0-9]+' uninstall.ps1; then
+            echo "ERROR: uninstall.ps1 contains hardcoded version!"
+            exit 1
+          fi
+
+          echo "✓ No hardcoded versions found in scripts"
+
+  # ============================================================================
   # Formatting and Linting
   # ============================================================================
   lint:

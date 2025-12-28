@@ -9,8 +9,17 @@ $InstallDir = "C:\Program Files\DanteTimeSync"
 $ServiceName = "dantetimesync"
 $DataDir = "C:\ProgramData\DanteTimeSync"
 
+# Fetch version from GitHub first (single source of truth: Cargo.toml -> GitHub Release)
+$LatestReleaseUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
+try {
+    $ReleaseInfo = Invoke-RestMethod -Uri $LatestReleaseUrl -ErrorAction Stop
+    $Version = $ReleaseInfo.tag_name
+} catch {
+    $Version = "unknown"
+}
+
 Write-Host ""
-Write-Host ">>> Dante Time Sync Windows Installer <<<" -ForegroundColor Cyan
+Write-Host ">>> Dante Time Sync Windows Installer $Version <<<" -ForegroundColor Cyan
 Write-Host ""
 
 # Check for Administrator privileges
@@ -511,16 +520,11 @@ try {
     Write-Warning "Failed to set permissions on $DataDir. You might need Admin rights to edit config."
 }
 
-# 3. Fetch Latest Release Info
-Write-Host "Fetching latest release info..."
-try {
-    $LatestReleaseUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
-    $ReleaseInfo = Invoke-RestMethod -Uri $LatestReleaseUrl
-} catch {
+# 3. Verify Release Info (already fetched at startup for header)
+if (-not $ReleaseInfo) {
     Write-Error "Failed to fetch release info. Check internet connection."
 }
 
-$Version = $ReleaseInfo.tag_name
 Write-Host "Installing Version: $Version" -ForegroundColor Green
 
 # Use exact matching to avoid ambiguity
