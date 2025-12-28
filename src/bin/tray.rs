@@ -9,6 +9,8 @@ fn main() {
 mod app {
     use serde::Deserialize;
     use std::cell::RefCell;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
     use std::time::Duration;
     use tokio::io::AsyncReadExt;
     use tokio::net::windows::named_pipe::ClientOptions;
@@ -92,10 +94,43 @@ mod app {
         pub ntp_failed: bool,
     }
 
+    // ========================================================================
+    // GITHUB RELEASE - For version check
+    // ========================================================================
+
+    #[derive(Deserialize, Debug)]
+    struct GitHubRelease {
+        tag_name: String,
+    }
+
+    /// Parse version string (e.g., "v1.6.4" or "1.6.4") into comparable tuple
+    fn parse_version(version: &str) -> Option<(u32, u32, u32)> {
+        let v = version.trim_start_matches('v');
+        let parts: Vec<&str> = v.split('.').collect();
+        if parts.len() >= 3 {
+            Some((
+                parts[0].parse().ok()?,
+                parts[1].parse().ok()?,
+                parts[2].parse().ok()?,
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Compare versions, returns true if remote is newer than local
+    fn is_newer_version(local: &str, remote: &str) -> bool {
+        match (parse_version(local), parse_version(remote)) {
+            (Some(l), Some(r)) => r > l,
+            _ => false,
+        }
+    }
+
     #[derive(Debug)]
     enum AppEvent {
         Update(SyncStatus),
         Offline,
+        NewVersionAvailable(String),
     }
 
     // ========================================================================
@@ -109,6 +144,25 @@ mod app {
             .text1(message)
             .sound(Some(Sound::Default))
             .show();
+    }
+
+    // ========================================================================
+    // VERSION CHECK - GitHub API
+    // ========================================================================
+
+    const GITHUB_API_URL: &str =
+        "https://api.github.com/repos/zbynekdrlik/dantetimesync/releases/latest";
+
+    /// Fetch the latest version from GitHub releases
+    async fn check_latest_version() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let client = reqwest::Client::builder()
+            .user_agent("DanteTimeSync-Tray")
+            .timeout(Duration::from_secs(10))
+            .build()?;
+
+        let response = client.get(GITHUB_API_URL).send().await?;
+        let release: GitHubRelease = response.json().await?;
+        Ok(release.tag_name)
     }
 
     /// Track previous state for detecting transitions
@@ -220,6 +274,9 @@ mod app {
         let live_log_i = MenuItem::new("View Live Log", true, None);
         let config_i = MenuItem::new("Edit Configuration", true, None);
 
+        // Upgrade - disabled until new version detected
+        let upgrade_i = MenuItem::new("Check for Updates...", true, None);
+
         let quit_i = MenuItem::new("Quit", true, None);
 
         let menu = Menu::new();
@@ -234,6 +291,9 @@ mod app {
         menu.append(&log_i).unwrap();
         menu.append(&live_log_i).unwrap();
         menu.append(&config_i).unwrap();
+        menu.append(&tray_icon::menu::PredefinedMenuItem::separator())
+            .unwrap();
+        menu.append(&upgrade_i).unwrap();
         menu.append(&tray_icon::menu::PredefinedMenuItem::separator())
             .unwrap();
         menu.append(&quit_i).unwrap();
@@ -255,7 +315,7 @@ mod app {
                 .unwrap(),
         ));
 
-        // Spawn poller thread... (kept same)
+        // Spawn status poller thread
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -295,6 +355,48 @@ mod app {
                             tokio::time::sleep(Duration::from_secs(2)).await;
                         }
                     }
+                }
+            });
+        });
+
+        // ====================================================================
+        // VERSION CHECK - Periodic check for updates
+        // ====================================================================
+        let version_proxy = event_loop.create_proxy();
+        let current_version = env!("CARGO_PKG_VERSION").to_string();
+        let update_available = Arc::new(AtomicBool::new(false));
+        let update_available_clone = update_available.clone();
+
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            rt.block_on(async move {
+                // Initial delay before first check (10 seconds after startup)
+                tokio::time::sleep(Duration::from_secs(10)).await;
+
+                loop {
+                    // Check for new version
+                    match check_latest_version().await {
+                        Ok(latest) => {
+                            if is_newer_version(&current_version, &latest) {
+                                // Only notify if we haven't already
+                                if !update_available_clone.load(Ordering::Relaxed) {
+                                    update_available_clone.store(true, Ordering::Relaxed);
+                                    let _ = version_proxy
+                                        .send_event(AppEvent::NewVersionAvailable(latest));
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            // Silently ignore version check failures
+                        }
+                    }
+
+                    // Check every 6 hours
+                    tokio::time::sleep(Duration::from_secs(6 * 60 * 60)).await;
                 }
             });
         });
@@ -482,6 +584,16 @@ mod app {
                             status_i.set_text("Service Offline".to_string());
                             mode_i.set_text("--".to_string());
                         }
+                        AppEvent::NewVersionAvailable(new_version) => {
+                            // Update menu item text to show available version
+                            upgrade_i.set_text(format!("Upgrade to {}", new_version));
+
+                            // Show notification
+                            show_notification(
+                                "Dante Time Sync",
+                                &format!("New version {} available", new_version)
+                            );
+                        }
                     }
                 }
                 _ => {
@@ -511,6 +623,15 @@ mod app {
                         } else if event.id == config_i.id() {
                             let _ = std::process::Command::new("notepad.exe")
                                 .arg(r"C:\ProgramData\DanteTimeSync\config.json")
+                                .spawn();
+                        } else if event.id == upgrade_i.id() {
+                            // Run upgrade via PowerShell IRM (Invoke-RestMethod)
+                            // This downloads and executes the install script from GitHub
+                            let _ = std::process::Command::new("powershell.exe")
+                                .args([
+                                    "-Command",
+                                    "Start-Process powershell -Verb RunAs -ArgumentList '-NoExit','-Command','irm https://raw.githubusercontent.com/zbynekdrlik/dantetimesync/master/install.ps1 | iex'"
+                                ])
                                 .spawn();
                         }
                     }

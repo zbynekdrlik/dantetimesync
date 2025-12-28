@@ -5,6 +5,33 @@ All notable changes to DanteTimeSync will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2025-12-28
+
+### Added
+- Automatic update check: tray app periodically checks GitHub for new versions (every 6 hours)
+- Update notification: toast notification when new version is available
+- Upgrade menu item: one-click upgrade via PowerShell IRM from tray menu
+- Version comparison logic to detect newer releases
+
+### Dependencies
+- Added reqwest HTTP client for GitHub API communication
+
+## [1.6.4] - 2025-12-27
+
+### Fixed
+- Jitter estimator now persists across NTP step corrections (was incorrectly clearing on each step)
+
+## [1.6.3] - 2025-12-27
+
+### Added
+- Adaptive jitter smoothing for high-jitter systems (Realtek NICs, Hyper-V hosts)
+- JitterEstimator measures stddev of drift rate over 30-sample window
+- Dynamic EMA alpha: 0.3 for low jitter (<2 µs/s) → 0.1 for high jitter (>8 µs/s)
+- Jitter logging every 50 samples when adaptive smoothing is active
+
+### Changed
+- EMA alpha now adapts based on measured jitter level instead of fixed value
+
 ## [1.5.6] - 2025-12-26
 
 ### Added
