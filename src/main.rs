@@ -75,10 +75,10 @@ use windows_service::{
 
 // Use library crate modules
 #[cfg(windows)]
-use dantetimesync::net_pcap;
+use dantesync::net_pcap;
 #[cfg(unix)]
-use dantetimesync::ptp;
-use dantetimesync::{clock, config, controller, net, ntp, status, traits};
+use dantesync::ptp;
+use dantesync::{clock, config, controller, net, ntp, status, traits};
 
 use config::SystemConfig;
 use controller::PtpController;
@@ -110,9 +110,9 @@ impl Default for Config {
 
 fn load_config() -> Config {
     #[cfg(windows)]
-    let path = r"C:\ProgramData\DanteTimeSync\config.json";
+    let path = r"C:\ProgramData\DanteSync\config.json";
     #[cfg(not(windows))]
-    let path = "/etc/dantetimesync/config.json";
+    let path = "/etc/dantesync/config.json";
 
     if let Ok(content) = std::fs::read_to_string(path) {
         if let Ok(cfg) = serde_json::from_str::<Config>(&content) {
@@ -285,14 +285,14 @@ fn enable_realtime_priority() {
 fn acquire_singleton_lock() -> Result<File> {
     #[cfg(unix)]
     {
-        let lock_path = "/var/run/dantetimesync.lock";
+        let lock_path = "/var/run/dantesync.lock";
         let file = File::create(lock_path)
             .map_err(|e| anyhow!("Failed to create lock file {}: {}", lock_path, e))?;
 
         match flock(file.as_raw_fd(), FlockArg::LockExclusiveNonblock) {
             Ok(_) => Ok(file),
             Err(nix::errno::Errno::EAGAIN) => Err(anyhow!(
-                "Another instance of dantetimesync is already running! (Lockfile: {})",
+                "Another instance of dantesync is already running! (Lockfile: {})",
                 lock_path
             )),
             Err(e) => Err(e.into()),
@@ -304,7 +304,7 @@ fn acquire_singleton_lock() -> Result<File> {
         // But File::create opens/truncates.
         // We want shared read, exclusive write?
         // Simple create is fine for now if we hold the handle.
-        let file = File::create("dantetimesync.lock")?;
+        let file = File::create("dantesync.lock")?;
         Ok(file)
     }
 }
@@ -322,7 +322,7 @@ fn start_ipc_server(status: Arc<RwLock<SyncStatus>>) {
             use tokio::io::AsyncWriteExt;
 
             // Pre-allocate UTF-16 strings outside loop for performance
-            let pipe_name_wide: Vec<u16> = r"\\.\pipe\dantetimesync"
+            let pipe_name_wide: Vec<u16> = r"\\.\pipe\dantesync"
                 .encode_utf16()
                 .chain(std::iter::once(0))
                 .collect();
@@ -579,7 +579,7 @@ fn run_sync_loop(args: Args, running: Arc<AtomicBool>, system_config: SystemConf
 
 // --- Windows Service Entry ---
 #[cfg(windows)]
-const SERVICE_NAME: &str = "dantetimesync";
+const SERVICE_NAME: &str = "dantesync";
 
 #[cfg(windows)]
 const SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
@@ -674,7 +674,7 @@ fn main() -> Result<()> {
     #[cfg(windows)]
     if args.service {
         // Initialize File Logging for Service
-        let log_path = r"C:\ProgramData\DanteTimeSync\dantetimesync.log";
+        let log_path = r"C:\ProgramData\DanteSync\dantesync.log";
 
         // Log Rotation (Simple: 1MB limit check on startup)
         if let Ok(metadata) = std::fs::metadata(log_path) {

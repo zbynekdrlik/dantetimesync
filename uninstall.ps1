@@ -1,22 +1,22 @@
-# Dante Time Sync Uninstaller for Windows
+# DanteSync Uninstaller for Windows
 # Run as Administrator in PowerShell
 
 $ErrorActionPreference = "Stop"
 
-$ServiceName = "dantetimesync"
-$InstallDir = "C:\Program Files\DanteTimeSync"
-$DataDir = "C:\ProgramData\DanteTimeSync"
+$ServiceName = "dantesync"
+$InstallDir = "C:\Program Files\DanteSync"
+$DataDir = "C:\ProgramData\DanteSync"
 
-Write-Host ">>> Dante Time Sync Windows Uninstaller <<<" -ForegroundColor Cyan
+Write-Host ">>> DanteSync Windows Uninstaller <<<" -ForegroundColor Cyan
 
 # 1. Stop and remove tray app
 Write-Host "Stopping tray application..."
-Stop-Process -Name "dantetray" -Force -ErrorAction SilentlyContinue
+Stop-Process -Name "dantesync-tray" -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 
 # 2. Remove scheduled task
 Write-Host "Removing scheduled task..."
-Unregister-ScheduledTask -TaskName "DanteTray" -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName "DanteSyncTray" -Confirm:$false -ErrorAction SilentlyContinue
 
 # 3. Remove registry startup entries
 Write-Host "Removing registry startup entries..."
@@ -24,18 +24,18 @@ $RegPathCU = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $RegPathLM = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
 
 try {
-    Remove-ItemProperty -Path $RegPathCU -Name "DanteTray" -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $RegPathCU -Name "DanteSyncTray" -ErrorAction SilentlyContinue
     Write-Host "  - Removed current user registry entry." -ForegroundColor Gray
 } catch { }
 
 try {
-    Remove-ItemProperty -Path $RegPathLM -Name "DanteTray" -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $RegPathLM -Name "DanteSyncTray" -ErrorAction SilentlyContinue
     Write-Host "  - Removed machine-wide registry entry." -ForegroundColor Gray
 } catch { }
 
 # 3b. Remove Start Menu shortcut
 Write-Host "Removing Start Menu shortcut..."
-$StartMenuShortcut = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Dante Time Sync.lnk"
+$StartMenuShortcut = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\DanteSync.lnk"
 try {
     if (Test-Path $StartMenuShortcut) {
         Remove-Item -Path $StartMenuShortcut -Force -ErrorAction SilentlyContinue
@@ -45,7 +45,7 @@ try {
 
 # 3c. Remove Add/Remove Programs registry entry
 Write-Host "Removing from Add/Remove Programs..."
-$UninstallKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\DanteTimeSync"
+$UninstallKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\DanteSync"
 try {
     if (Test-Path $UninstallKey) {
         Remove-Item -Path $UninstallKey -Recurse -Force -ErrorAction SilentlyContinue
@@ -66,7 +66,7 @@ if ($Service) {
 }
 
 # Kill any remaining processes
-Stop-Process -Name "dantetimesync" -Force -ErrorAction SilentlyContinue
+Stop-Process -Name "dantesync" -Force -ErrorAction SilentlyContinue
 
 # 5. Remove program files
 Write-Host "Removing program files..."

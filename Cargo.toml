@@ -15,12 +15,12 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 [package]
-name = "dantetimesync"
-version = "1.7.7"
+name = "dantesync"
+version = "1.8.0"
 edition = "2021"
 description = "High-precision PTP synchronization for Dante Audio networks"
 license = "MIT"
-repository = "https://github.com/zbynekdrlik/dantetimesync"
+repository = "https://github.com/zbynekdrlik/dantesync"
 keywords = ["ptp", "dante", "audio", "synchronization", "time"]
 categories = ["network-programming"]
 rust-version = "1.70"
@@ -67,11 +67,11 @@ rand = "0.9.2"
 tempfile = "3.10"
 
 [[bin]]
-name = "dantetimesync"
+name = "dantesync"
 path = "src/main.rs"
 
 [[bin]]
-name = "dantetray"
+name = "dantesync-tray"
 path = "src/bin/tray.rs"
 
 [[bin]]

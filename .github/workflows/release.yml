@@ -20,14 +20,14 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact_name: dantetimesync
-            asset_name: dantetimesync-linux-amd64
+            artifact_name: dantesync
+            asset_name: dantesync-linux-amd64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: dantetimesync.exe
-            asset_name: dantetimesync-windows-amd64.exe
-            tray_artifact_name: dantetray.exe
-            tray_asset_name: dantetray-windows-amd64.exe
+            artifact_name: dantesync.exe
+            asset_name: dantesync-windows-amd64.exe
+            tray_artifact_name: dantesync-tray.exe
+            tray_asset_name: dantesync-tray-windows-amd64.exe
 
     steps:
       - name: Checkout code
@@ -67,11 +67,11 @@ jobs:
 
       - name: Build Main (Linux)
         if: runner.os == 'Linux'
-        run: cargo build --release --bin dantetimesync --target ${{ matrix.target }} --verbose
+        run: cargo build --release --bin dantesync --target ${{ matrix.target }} --verbose
 
       - name: Build Main & Tray (Windows)
         if: runner.os == 'Windows'
-        run: cargo build --release --bin dantetimesync --bin dantetray --target ${{ matrix.target }} --verbose
+        run: cargo build --release --bin dantesync --bin dantesync-tray --target ${{ matrix.target }} --verbose
 
       - name: Rename Artifacts (Linux)
         if: runner.os == 'Linux'

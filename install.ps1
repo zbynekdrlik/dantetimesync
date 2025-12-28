@@ -1,13 +1,13 @@
-# Dante Time Sync Installer for Windows
+# DanteSync Installer for Windows
 # Run as Administrator in PowerShell
 
 $ErrorActionPreference = "Stop"
 
 $RepoOwner = "zbynekdrlik"
-$RepoName = "dantetimesync"
-$InstallDir = "C:\Program Files\DanteTimeSync"
-$ServiceName = "dantetimesync"
-$DataDir = "C:\ProgramData\DanteTimeSync"
+$RepoName = "dantesync"
+$InstallDir = "C:\Program Files\DanteSync"
+$ServiceName = "dantesync"
+$DataDir = "C:\ProgramData\DanteSync"
 
 # Fetch version from GitHub first (single source of truth: Cargo.toml -> GitHub Release)
 $LatestReleaseUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
@@ -19,7 +19,7 @@ try {
 }
 
 Write-Host ""
-Write-Host ">>> Dante Time Sync Windows Installer $Version <<<" -ForegroundColor Cyan
+Write-Host ">>> DanteSync Windows Installer $Version <<<" -ForegroundColor Cyan
 Write-Host ""
 
 # Check for Administrator privileges
@@ -528,15 +528,15 @@ if (-not $ReleaseInfo) {
 Write-Host "Installing Version: $Version" -ForegroundColor Green
 
 # Use exact matching to avoid ambiguity
-$Asset = $ReleaseInfo.assets | Where-Object { $_.name -eq "dantetimesync-windows-amd64.exe" } | Select-Object -First 1
-$TrayAsset = $ReleaseInfo.assets | Where-Object { $_.name -eq "dantetray-windows-amd64.exe" } | Select-Object -First 1
+$Asset = $ReleaseInfo.assets | Where-Object { $_.name -eq "dantesync-windows-amd64.exe" } | Select-Object -First 1
+$TrayAsset = $ReleaseInfo.assets | Where-Object { $_.name -eq "dantesync-tray-windows-amd64.exe" } | Select-Object -First 1
 
 if (!$Asset) {
-    Write-Error "Could not find 'dantetimesync-windows-amd64.exe' in latest release."
+    Write-Error "Could not find 'dantesync-windows-amd64.exe' in latest release."
 }
 
-$ExePath = "$InstallDir\dantetimesync.exe"
-$TrayPath = "$InstallDir\dantetray.exe"
+$ExePath = "$InstallDir\dantesync.exe"
+$TrayPath = "$InstallDir\dantesync-tray.exe"
 
 # 4. Stop & Remove Existing Service/Processes (CRITICAL: Do this BEFORE download)
 Write-Host "Stopping services and processes..."
@@ -564,10 +564,10 @@ Set-Service -Name "W32Time" -StartupType Disabled -ErrorAction SilentlyContinue
 
 # Kill processes - try graceful close for tray first to avoid ghost icons
 Write-Host "Checking for running processes..."
-Stop-Process -Name "dantetimesync" -Force -ErrorAction SilentlyContinue
+Stop-Process -Name "dantesync" -Force -ErrorAction SilentlyContinue
 
-# Gracefully close dantetray by sending close message to its window
-$trayProc = Get-Process -Name "dantetray" -ErrorAction SilentlyContinue
+# Gracefully close dantesync-tray by sending close message to its window
+$trayProc = Get-Process -Name "dantesync-tray" -ErrorAction SilentlyContinue
 if ($trayProc) {
     Write-Host "  - Closing tray application gracefully..."
     # Try to close main window first (allows cleanup of tray icon)
@@ -575,7 +575,7 @@ if ($trayProc) {
     Start-Sleep -Seconds 2
     # If still running, force kill
     if (!$trayProc.HasExited) {
-        Stop-Process -Name "dantetray" -Force -ErrorAction SilentlyContinue
+        Stop-Process -Name "dantesync-tray" -Force -ErrorAction SilentlyContinue
     }
 }
 Start-Sleep -Seconds 1
@@ -596,7 +596,7 @@ if ($TrayAsset) {
         Write-Warning "Failed to download tray app. Error: $_"
     }
 } else {
-    Write-Warning "Tray application ('dantetray-windows-amd64.exe') not found in latest release."
+    Write-Warning "Tray application ('dantesync-tray-windows-amd64.exe') not found in latest release."
 }
 
 # 6. Install Service
@@ -606,7 +606,7 @@ Write-Host "Installing Service..."
 $BinPath = "`"$ExePath`" --service"
 
 try {
-    New-Service -Name $ServiceName -BinaryPathName $BinPath -DisplayName "Dante Time Sync" -StartupType Automatic -Description "Synchronizes system time with Dante PTP Master"
+    New-Service -Name $ServiceName -BinaryPathName $BinPath -DisplayName "DanteSync" -StartupType Automatic -Description "Synchronizes system time with Dante PTP Master"
 } catch {
     Write-Error "Failed to create service. Ensure you are running as Administrator. Error: $_"
 }
@@ -625,18 +625,18 @@ if (Test-Path $TrayPath) {
 
     # Method 1: Scheduled Task (Primary - works for all users at logon)
     Write-Host "  - Registering scheduled task..."
-    Unregister-ScheduledTask -TaskName "DanteTray" -Confirm:$false -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName "DanteSyncTray" -Confirm:$false -ErrorAction SilentlyContinue
     $Trigger = New-ScheduledTaskTrigger -AtLogon
     $Action = New-ScheduledTaskAction -Execute $TrayPath
     $Principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users" -RunLevel Limited
-    Register-ScheduledTask -TaskName "DanteTray" -Trigger $Trigger -Action $Action -Principal $Principal -Force | Out-Null
+    Register-ScheduledTask -TaskName "DanteSyncTray" -Trigger $Trigger -Action $Action -Principal $Principal -Force | Out-Null
 
     # Method 2: Registry Run entry (Fallback - per-user, more reliable in some scenarios)
     Write-Host "  - Adding registry startup entry..."
     $RegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
     try {
         # Set for current user
-        Set-ItemProperty -Path $RegPath -Name "DanteTray" -Value "`"$TrayPath`"" -ErrorAction Stop
+        Set-ItemProperty -Path $RegPath -Name "DanteSyncTray" -Value "`"$TrayPath`"" -ErrorAction Stop
         Write-Host "    Registry entry added for current user." -ForegroundColor Gray
     } catch {
         Write-Warning "Failed to add registry entry: $_"
@@ -645,7 +645,7 @@ if (Test-Path $TrayPath) {
     # Also add to HKLM for all users (requires admin, which we have)
     $RegPathLM = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
     try {
-        Set-ItemProperty -Path $RegPathLM -Name "DanteTray" -Value "`"$TrayPath`"" -ErrorAction Stop
+        Set-ItemProperty -Path $RegPathLM -Name "DanteSyncTray" -Value "`"$TrayPath`"" -ErrorAction Stop
         Write-Host "    Registry entry added for all users." -ForegroundColor Gray
     } catch {
         Write-Warning "Failed to add machine-wide registry entry: $_"
@@ -653,7 +653,7 @@ if (Test-Path $TrayPath) {
 
     # Start tray in user's interactive session (works over SSH/remote)
     # Using scheduled task ensures it runs on the logged-in user's desktop
-    $TrayProcess = Get-Process -Name "dantetray" -ErrorAction SilentlyContinue
+    $TrayProcess = Get-Process -Name "dantesync-tray" -ErrorAction SilentlyContinue
     if (!$TrayProcess) {
         Write-Host "Starting Tray App in interactive session..."
 
@@ -661,7 +661,7 @@ if (Test-Path $TrayPath) {
         $LoggedInUser = (Get-WmiObject -Class Win32_ComputerSystem).UserName
         if ($LoggedInUser) {
             # Create a one-time scheduled task to run immediately in user's session
-            $TrayTaskName = "DanteTrayStart"
+            $TrayTaskName = "DanteSyncTrayStart"
             Unregister-ScheduledTask -TaskName $TrayTaskName -Confirm:$false -ErrorAction SilentlyContinue
 
             $Action = New-ScheduledTaskAction -Execute $TrayPath
@@ -689,23 +689,23 @@ if (Test-Path $TrayPath) {
 Write-Host "Adding to Start Menu..."
 try {
     $StartMenuPath = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs"
-    $ShortcutPath = "$StartMenuPath\Dante Time Sync.lnk"
+    $ShortcutPath = "$StartMenuPath\DanteSync.lnk"
 
     $WshShell = New-Object -ComObject WScript.Shell
     $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
     $Shortcut.TargetPath = $TrayPath
-    $Shortcut.Description = "Dante Time Sync - Tray Application"
+    $Shortcut.Description = "DanteSync - Tray Application"
     $Shortcut.WorkingDirectory = $InstallDir
     $Shortcut.Save()
 
-    Write-Host "  - Added 'Dante Time Sync' to Start Menu" -ForegroundColor Gray
+    Write-Host "  - Added 'DanteSync' to Start Menu" -ForegroundColor Gray
 } catch {
     Write-Warning "Failed to add Start Menu shortcut: $_"
 }
 
 # 10. Register in Add/Remove Programs (Windows "Installed Apps")
 Write-Host "Registering in Windows Installed Apps..."
-$UninstallKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\DanteTimeSync"
+$UninstallKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\DanteSync"
 
 # Get version from executable
 $FileVersion = $Version -replace '^v', ''  # Remove 'v' prefix if present
@@ -715,7 +715,7 @@ try {
         New-Item -Path $UninstallKey -Force | Out-Null
     }
 
-    Set-ItemProperty -Path $UninstallKey -Name "DisplayName" -Value "Dante Time Sync"
+    Set-ItemProperty -Path $UninstallKey -Name "DisplayName" -Value "DanteSync"
     Set-ItemProperty -Path $UninstallKey -Name "DisplayVersion" -Value $FileVersion
     Set-ItemProperty -Path $UninstallKey -Name "Publisher" -Value "Zbyněk Drlík"
     Set-ItemProperty -Path $UninstallKey -Name "InstallLocation" -Value $InstallDir
@@ -757,5 +757,5 @@ if ($ScriptPath) {
 
 Write-Host "Installation Complete!" -ForegroundColor Green
 Write-Host "Service '$ServiceName' is running."
-Write-Host "Logs available at: $DataDir\dantetimesync.log" -ForegroundColor Gray
+Write-Host "Logs available at: $DataDir\dantesync.log" -ForegroundColor Gray
 Write-Host "Config available at: $DataDir\config.json" -ForegroundColor Gray

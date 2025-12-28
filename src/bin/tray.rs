@@ -37,7 +37,7 @@ mod app {
         /// Try to acquire single-instance lock. Returns None if another instance is running.
         fn try_acquire() -> Option<Self> {
             unsafe {
-                let mutex_name: Vec<u16> = "Global\\DanteTrayMutex\0".encode_utf16().collect();
+                let mutex_name: Vec<u16> = "Global\\DanteSyncTrayMutex\0".encode_utf16().collect();
                 let handle = CreateMutexW(None, false, PCWSTR(mutex_name.as_ptr()));
 
                 match handle {
@@ -151,12 +151,12 @@ mod app {
     // ========================================================================
 
     const GITHUB_API_URL: &str =
-        "https://api.github.com/repos/zbynekdrlik/dantetimesync/releases/latest";
+        "https://api.github.com/repos/zbynekdrlik/dantesync/releases/latest";
 
     /// Fetch the latest version from GitHub releases
     async fn check_latest_version() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let client = reqwest::Client::builder()
-            .user_agent("DanteTimeSync-Tray")
+            .user_agent("DanteSync-Tray")
             .timeout(Duration::from_secs(10))
             .build()?;
 
@@ -361,7 +361,7 @@ mod app {
                     match ClientOptions::new()
                         .write(false)
                         .read(true)
-                        .open(r"\\.\pipe\dantetimesync")
+                        .open(r"\\.\pipe\dantesync")
                     {
                         Ok(mut client) => {
                             loop {
@@ -628,7 +628,7 @@ mod app {
                         } else if event.id == restart_i.id() {
                             // Restart service using PowerShell (requires elevation)
                             let _ = std::process::Command::new("powershell.exe")
-                                .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Restart-Service dantetimesync -Force'"])
+                                .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Restart-Service dantesync -Force'"])
                                 .spawn();
                         } else if event.id == start_stop_i.id() {
                             // Start or Stop service based on current state
@@ -636,25 +636,25 @@ mod app {
                             if is_online {
                                 // Service running - stop it
                                 let _ = std::process::Command::new("powershell.exe")
-                                    .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Stop-Service dantetimesync -Force'"])
+                                    .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Stop-Service dantesync -Force'"])
                                     .spawn();
                             } else {
                                 // Service stopped - start it
                                 let _ = std::process::Command::new("powershell.exe")
-                                    .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Start-Service dantetimesync'"])
+                                    .args(["-Command", "Start-Process powershell -Verb RunAs -ArgumentList '-Command','Start-Service dantesync'"])
                                     .spawn();
                             }
                         } else if event.id == log_i.id() {
                             let _ = std::process::Command::new("notepad.exe")
-                                .arg(r"C:\ProgramData\DanteTimeSync\dantetimesync.log")
+                                .arg(r"C:\ProgramData\DanteSync\dantesync.log")
                                 .spawn();
                         } else if event.id == live_log_i.id() {
                             let _ = std::process::Command::new("powershell.exe")
-                                .args(["-NoExit", "-Command", "Get-Content 'C:\\ProgramData\\DanteTimeSync\\dantetimesync.log' -Tail 20 -Wait"])
+                                .args(["-NoExit", "-Command", "Get-Content 'C:\\ProgramData\\DanteSync\\dantesync.log' -Tail 20 -Wait"])
                                 .spawn();
                         } else if event.id == config_i.id() {
                             let _ = std::process::Command::new("notepad.exe")
-                                .arg(r"C:\ProgramData\DanteTimeSync\config.json")
+                                .arg(r"C:\ProgramData\DanteSync\config.json")
                                 .spawn();
                         } else if event.id == upgrade_i.id() {
                             // Run upgrade via PowerShell IRM (Invoke-RestMethod)
@@ -662,7 +662,7 @@ mod app {
                             let _ = std::process::Command::new("powershell.exe")
                                 .args([
                                     "-Command",
-                                    "Start-Process powershell -Verb RunAs -ArgumentList '-NoExit','-Command','irm https://raw.githubusercontent.com/zbynekdrlik/dantetimesync/master/install.ps1 | iex'"
+                                    "Start-Process powershell -Verb RunAs -ArgumentList '-NoExit','-Command','irm https://raw.githubusercontent.com/zbynekdrlik/dantesync/master/install.ps1 | iex'"
                                 ])
                                 .spawn();
                         }

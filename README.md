@@ -1,4 +1,4 @@
-# Dante PTP Time Sync
+# DanteSync
 
 A high-precision PTP (Precision Time Protocol) synchronization tool optimized for Dante Audio networks, written in Rust.
 
@@ -21,7 +21,7 @@ A high-precision PTP (Precision Time Protocol) synchronization tool optimized fo
 
 ### Linux
 ```bash
-curl -sSL https://raw.githubusercontent.com/zbynekdrlik/dantetimesync/master/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/zbynekdrlik/dantesync/master/install.sh | sudo bash
 ```
 
 ### Windows
@@ -29,19 +29,19 @@ curl -sSL https://raw.githubusercontent.com/zbynekdrlik/dantetimesync/master/ins
 2. Open PowerShell as **Administrator**
 3. Run:
 ```powershell
-irm https://raw.githubusercontent.com/zbynekdrlik/dantetimesync/master/install.ps1 | iex
+irm https://raw.githubusercontent.com/zbynekdrlik/dantesync/master/install.ps1 | iex
 ```
 
 ## Uninstall
 
 ### Windows
 ```powershell
-irm https://raw.githubusercontent.com/zbynekdrlik/dantetimesync/master/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/zbynekdrlik/dantesync/master/uninstall.ps1 | iex
 ```
 
 ## Usage (Manual)
 ```bash
-dantetimesync [OPTIONS]
+dantesync [OPTIONS]
 ```
 - `--interface <NAME>`: Bind to specific interface (e.g., `eth0`)
 - `--ntp-server <IP>`: NTP server for initial sync (default: `10.77.8.2`)
@@ -60,12 +60,12 @@ cargo build --release
 ## Configuration
 
 Config files:
-- Linux: `/etc/dantetimesync/config.json`
-- Windows: `C:\ProgramData\DanteTimeSync\config.json`
+- Linux: `/etc/dantesync/config.json`
+- Windows: `C:\ProgramData\DanteSync\config.json`
 
 Log files:
-- Linux: `/var/log/dantetimesync/dantetimesync.log`
-- Windows: `C:\ProgramData\DanteTimeSync\dantetimesync.log`
+- Linux: `/var/log/dantesync/dantesync.log`
+- Windows: `C:\ProgramData\DanteSync\dantesync.log`
 
 ## License
 MIT

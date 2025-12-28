@@ -557,8 +557,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
-name = "dantetimesync"
-version = "1.7.6"
+name = "dantesync"
+version = "1.8.0"
 dependencies = [
  "anyhow",
  "byteorder",

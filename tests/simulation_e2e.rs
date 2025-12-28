@@ -1,9 +1,9 @@
 use anyhow::Result;
-use dantetimesync::clock::SystemClock;
-use dantetimesync::config::SystemConfig;
-use dantetimesync::controller::PtpController;
-use dantetimesync::status::SyncStatus;
-use dantetimesync::traits::{NtpSource, PtpNetwork};
+use dantesync::clock::SystemClock;
+use dantesync::config::SystemConfig;
+use dantesync::controller::PtpController;
+use dantesync::status::SyncStatus;
+use dantesync::traits::{NtpSource, PtpNetwork};
 use std::cell::RefCell;
 use std::f64::consts::PI;
 use std::sync::{Arc, RwLock};
@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime};
 // ============================================================================
 // RATE-BASED SERVO E2E TESTS
 // ============================================================================
-// The DanteTimeSync controller uses a RATE-BASED servo algorithm:
+// The DanteSync controller uses a RATE-BASED servo algorithm:
 // - Dante PTP timestamps are device uptime, NOT UTC
 // - The absolute offset is meaningless for time accuracy
 // - What matters is the RATE OF CHANGE of offset (drift rate in us/s)

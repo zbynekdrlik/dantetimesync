@@ -1,9 +1,22 @@
 # Changelog
 
-All notable changes to DanteTimeSync will be documented in this file.
+All notable changes to DanteSync will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.8.0] - 2025-12-28
+
+### Changed
+- **BREAKING:** Renamed project from "DanteTimeSync" to "DanteSync"
+  - Main binary: `dantetimesync` → `dantesync`
+  - Tray binary: `dantetray` → `dantesync-tray`
+  - Windows service: `dantetimesync` → `dantesync`
+  - Install directory: `C:\Program Files\DanteTimeSync` → `C:\Program Files\DanteSync`
+  - Config directory: `C:\ProgramData\DanteTimeSync` → `C:\ProgramData\DanteSync`
+  - Linux config: `/etc/dantetimesync` → `/etc/dantesync`
+  - Named pipe: `\\.\pipe\dantetimesync` → `\\.\pipe\dantesync`
+  - GitHub repository: `zbynekdrlik/dantetimesync` → `zbynekdrlik/dantesync`
 
 ## [1.7.5] - 2025-12-28
 
@@ -25,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Update badge on tray icon: orange dot in corner when new version available
-- Start Menu shortcut: "Dante Time Sync" now appears in Windows Start Menu for easy access
+- Start Menu shortcut: "DanteSync" now appears in Windows Start Menu for easy access
 
 ### Fixed
 - Tray icon now visually indicates when update is available (persistent badge)

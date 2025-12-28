@@ -119,8 +119,8 @@ These operations are INDEPENDENT:
 ### Configuration
 
 Config file locations:
-- Linux: `/etc/dantetimesync/config.json`
-- Windows: `C:\ProgramData\DanteTimeSync\config.json`
+- Linux: `/etc/dantesync/config.json`
+- Windows: `C:\ProgramData\DanteSync\config.json`
 
 Key tunable parameters (in `config.rs`):
 - Servo gains: `kp`, `ki` (reference only - controller uses adaptive gains)
@@ -128,9 +128,9 @@ Key tunable parameters (in `config.rs`):
 
 ### Binaries
 
-- `dantetimesync` - Main sync daemon/service
-- `dantetray` - Windows tray application:
+- `dantesync` - Main sync daemon/service
+- `dantesync-tray` - Windows tray application:
   - Dynamic icon with pulsing ring based on drift rate
   - Toast notifications for state transitions (lock/unlock/offline)
   - Service control (Restart/Stop) via menu
-  - Reads status via named pipe IPC (`\\.\pipe\dantetimesync`)
+  - Reads status via named pipe IPC (`\\.\pipe\dantesync`)

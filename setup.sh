@@ -1,18 +1,18 @@
 #!/bin/bash
 set -e
 
-REPO="zbynekdrlik/dantetimesync"
+REPO="zbynekdrlik/dantesync"
 # We strictly expect the binary name produced by our CI/CD pipeline
-BIN_NAME="dantetimesync-linux-amd64"
-TARGET_BIN="dantetimesync"
+BIN_NAME="dantesync-linux-amd64"
+TARGET_BIN="dantesync"
 INSTALL_DIR="/usr/local/bin"
-SERVICE_FILE="/etc/systemd/system/dantetimesync.service"
+SERVICE_FILE="/etc/systemd/system/dantesync.service"
 TEMP_BIN="/tmp/$BIN_NAME"
 
 # Allow overriding NTP server via env var, default to 10.77.8.2
 NTP_SERVER="${NTP_SERVER:-10.77.8.2}"
 
-echo ">>> Dante Time Sync Web Installer (SOTA) <<<"
+echo ">>> DanteSync Web Installer (SOTA) <<<"
 echo ">>> Using NTP Server: $NTP_SERVER"
 
 if [ "$EUID" -ne 0 ]; then
@@ -38,7 +38,7 @@ apt-get install -y -qq util-linux curl
 
 # 3. Stop Service (to release binary lock)
 echo ">>> Stopping existing service (if any)..."
-systemctl stop dantetimesync 2>/dev/null || true
+systemctl stop dantesync 2>/dev/null || true
 
 # 4. Download Binary to Temp
 echo ">>> Downloading binary from $LATEST_URL..."
@@ -62,7 +62,7 @@ systemctl disable ntp 2>/dev/null || true
 echo ">>> Creating systemd service..."
 cat <<EOF > "$SERVICE_FILE"
 [Unit]
-Description=Dante PTP Time Sync Service
+Description=DanteSync PTP Time Sync Service
 After=network-online.target
 Wants=network-online.target
 
@@ -83,9 +83,9 @@ EOF
 # 8. Enable and Start
 echo ">>> Starting service..."
 systemctl daemon-reload
-systemctl enable dantetimesync
-systemctl restart dantetimesync
+systemctl enable dantesync
+systemctl restart dantesync
 
 echo ">>> Installation Complete!"
-echo "Status: systemctl status dantetimesync"
-echo "Logs:   journalctl -u dantetimesync -f"
+echo "Status: systemctl status dantesync"
+echo "Logs:   journalctl -u dantesync -f"

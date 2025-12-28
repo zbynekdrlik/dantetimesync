@@ -196,7 +196,7 @@ jobs:
 
       - name: Build (Windows)
         if: runner.os == 'Windows'
-        run: cargo build --release --bin dantetimesync --bin dantetray --target ${{ matrix.target }}
+        run: cargo build --release --bin dantesync --bin dantesync-tray --target ${{ matrix.target }}
 
   # ============================================================================
   # Code Coverage
