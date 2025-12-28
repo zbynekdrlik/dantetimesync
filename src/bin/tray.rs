@@ -488,30 +488,8 @@ mod app {
                                             "PTP restored - resuming PTP sync"
                                         );
                                     }
-                                    // NANO mode transitions (only when PTP is online)
-                                    else if is_nano && !state.was_nano {
-                                        show_notification(
-                                            "Dante Time Sync",
-                                            "NANO mode - ultra-precise sync achieved"
-                                        );
-                                    } else if !is_nano && state.was_nano && !is_ptp_offline {
-                                        show_notification(
-                                            "Dante Time Sync",
-                                            "Exited NANO mode"
-                                        );
-                                    }
-                                    // Lock state changes (only if not NANO or PTP offline transition)
-                                    else if status.is_locked && !state.was_locked && !is_ptp_offline {
-                                        show_notification(
-                                            "Dante Time Sync",
-                                            "Frequency locked - sync achieved"
-                                        );
-                                    } else if !status.is_locked && state.was_locked && !is_nano && !is_ptp_offline {
-                                        show_notification(
-                                            "Dante Time Sync",
-                                            "Lock lost - reacquiring..."
-                                        );
-                                    }
+                                    // NANO mode and lock state transitions: icon color change is sufficient,
+                                    // no toast notifications needed
 
                                     // Service came online
                                     if !state.was_online {
