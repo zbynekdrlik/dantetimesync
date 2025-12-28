@@ -3,7 +3,6 @@
 
 $ErrorActionPreference = "Stop"
 
-$InstallerVersion = "1.6.2"
 $RepoOwner = "zbynekdrlik"
 $RepoName = "dantetimesync"
 $InstallDir = "C:\Program Files\DanteTimeSync"
@@ -11,7 +10,7 @@ $ServiceName = "dantetimesync"
 $DataDir = "C:\ProgramData\DanteTimeSync"
 
 Write-Host ""
-Write-Host ">>> Dante Time Sync Windows Installer v$InstallerVersion <<<" -ForegroundColor Cyan
+Write-Host ">>> Dante Time Sync Windows Installer <<<" -ForegroundColor Cyan
 Write-Host ""
 
 # Check for Administrator privileges
