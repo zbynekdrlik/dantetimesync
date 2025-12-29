@@ -341,7 +341,7 @@ mod app {
         let tray_icon = RefCell::new(Some(
             TrayIconBuilder::new()
                 .with_menu(Box::new(menu.clone()))
-                .with_tooltip("Dante Time Sync - Connecting...")
+                .with_tooltip("DanteSync - Connecting...")
                 .with_icon(yellow_icon.clone())
                 .build()
                 .unwrap(),
@@ -476,24 +476,24 @@ mod app {
                                     // NTP failure transitions (critical)
                                     if status.ntp_failed && !state.was_ntp_failed {
                                         show_notification(
-                                            "Dante Time Sync",
+                                            "DanteSync",
                                             "NTP server unreachable"
                                         );
                                     } else if !status.ntp_failed && state.was_ntp_failed {
                                         show_notification(
-                                            "Dante Time Sync",
+                                            "DanteSync",
                                             "NTP connection restored"
                                         );
                                     }
                                     // PTP offline transitions (highest priority)
                                     else if is_ptp_offline && !state.was_ptp_offline {
                                         show_notification(
-                                            "Dante Time Sync",
+                                            "DanteSync",
                                             "PTP offline - running NTP-only sync"
                                         );
                                     } else if !is_ptp_offline && state.was_ptp_offline {
                                         show_notification(
-                                            "Dante Time Sync",
+                                            "DanteSync",
                                             "PTP restored - resuming PTP sync"
                                         );
                                     }
@@ -503,7 +503,7 @@ mod app {
                                     // Service came online
                                     if !state.was_online {
                                         show_notification(
-                                            "Dante Time Sync",
+                                            "DanteSync",
                                             "Service connected"
                                         );
                                     }
@@ -562,7 +562,7 @@ mod app {
                             let drift_str = format!("{:+.1}us/s", status.smoothed_rate_ppm);
 
                             let tooltip = format!(
-                                "Dante Time Sync v{}\nMode: {} | Drift: {}\nFreq Adj: {:+.1}ppm\nNTP Offset: {:+}us",
+                                "DanteSync v{}\nMode: {} | Drift: {}\nFreq Adj: {:+.1}ppm\nNTP Offset: {:+}us",
                                 version, mode_str, drift_str, status.drift_ppm, status.ntp_offset_us
                             );
 
@@ -585,7 +585,7 @@ mod app {
                                 let mut state = notification_state.borrow_mut();
                                 if state.was_online {
                                     show_notification(
-                                        "Dante Time Sync",
+                                        "DanteSync",
                                         "Service offline"
                                     );
                                 }
@@ -599,7 +599,7 @@ mod app {
 
                             if let Some(ref ti) = *tray_icon.borrow() {
                                 let _ = ti.set_icon(Some(offline_icon));
-                                let _ = ti.set_tooltip(Some(format!("Dante Time Sync v{}\nService Offline", version)));
+                                let _ = ti.set_tooltip(Some(format!("DanteSync v{}\nService Offline", version)));
                             }
                             status_i.set_text("Service Offline".to_string());
                             mode_i.set_text("--".to_string());
@@ -613,7 +613,7 @@ mod app {
 
                             // Show notification
                             show_notification(
-                                "Dante Time Sync",
+                                "DanteSync",
                                 &format!("New version {} available", new_version)
                             );
                         }
