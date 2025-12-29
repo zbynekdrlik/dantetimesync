@@ -34,14 +34,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **CI/CD Verification:** Wait until GitHub Actions CI/CD pipeline has successfully finished (green checkmark) before telling the user to update or run commands. Monitor `gh run view` until completion
 - **Autonomous Deployment:** Install and verify updates on remote machines (Windows/Linux) listed in `TARGETS.md` using available tools (SSH, etc.)
 - **STRICT CI - Fight Regressions:** CI is configured to be maximally strict to prevent regressions:
-  1. **Coverage threshold**: Minimum 60% project coverage, max 1% drop allowed, new code requires 80% coverage
-  2. **Security audit**: Blocks CI on ANY security advisory (`cargo audit --deny warnings`)
+  1. **Version bump required**: CI blocks merging if Cargo.toml version matches an existing release tag
+     - ALWAYS bump version before merging any code changes to master
+     - This prevents shipping different code under the same version number
+  2. **Coverage threshold**: Minimum 60% project coverage, max 1% drop allowed, new code requires 80% coverage
+  3. **Security audit**: Blocks CI on ANY security advisory (`cargo audit --deny warnings`)
      - Known transitive dependency advisories are explicitly ignored with `--ignore RUSTSEC-XXXX` after review
      - When adding ignores, document WHY it doesn't affect our code (e.g., we don't use the affected API)
      - NEW advisories will still fail CI - only reviewed/documented ones are ignored
-  3. **All checks must pass**: Lint, tests, build (Linux + Windows), coverage, security - ALL must be green
-  4. Never weaken CI checks. If a check fails, fix the code, don't disable the check
-  5. When adding features, always add corresponding tests to maintain coverage
+  4. **All checks must pass**: Lint, tests, build (Linux + Windows), coverage, security - ALL must be green
+  5. Never weaken CI checks. If a check fails, fix the code, don't disable the check
+  6. When adding features, always add corresponding tests to maintain coverage
 
 ## Build Commands
 
