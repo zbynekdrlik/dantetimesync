@@ -326,10 +326,11 @@ fn start_ipc_server(status: Arc<RwLock<SyncStatus>>) {
                 .encode_utf16()
                 .chain(std::iter::once(0))
                 .collect();
-            // SDDL: Allow Generic Read to Authenticated Users (more secure than Everyone)
-            // GR = Generic Read, AU = Authenticated Users
-            // This is needed because Service runs as SYSTEM and Tray runs as User.
-            let sddl_wide: Vec<u16> = "D:(A;;GR;;;AU)"
+            // SDDL: Grant full control to SYSTEM (service), read to Authenticated Users (tray)
+            // GA = Generic All (for SYSTEM to write), GR = Generic Read (for users to read)
+            // SY = SYSTEM, AU = Authenticated Users
+            // MUST include SYSTEM explicitly since custom DACL overrides defaults
+            let sddl_wide: Vec<u16> = "D:(A;;GA;;;SY)(A;;GR;;;AU)"
                 .encode_utf16()
                 .chain(std::iter::once(0))
                 .collect();
@@ -723,7 +724,7 @@ fn main() -> Result<()> {
         .init();
 
     // Log Version immediately
-    info!("Dante Time Sync v{}", env!("CARGO_PKG_VERSION"));
+    info!("DanteSync v{}", env!("CARGO_PKG_VERSION"));
 
     // Console Mode
     let _lock_file = match acquire_singleton_lock() {
