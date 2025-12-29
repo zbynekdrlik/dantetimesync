@@ -23,6 +23,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all tags for version check
+
+      - name: Check version not already released
+        run: |
+          # Extract version from Cargo.toml
+          CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "Cargo.toml version: $CARGO_VERSION"
+
+          # Check if tag v$CARGO_VERSION already exists
+          if git tag -l "v$CARGO_VERSION" | grep -q .; then
+            echo "ERROR: Version v$CARGO_VERSION is already released!"
+            echo "You must bump the version in Cargo.toml before merging."
+            echo ""
+            echo "Existing tags:"
+            git tag -l 'v*' | tail -5
+            exit 1
+          fi
+
+          echo "✓ Version v$CARGO_VERSION is new (not yet released)"
 
       - name: Check for hardcoded versions in scripts
         run: |
