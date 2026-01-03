@@ -631,24 +631,14 @@ if (Test-Path $TrayPath) {
     $Principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users" -RunLevel Limited
     Register-ScheduledTask -TaskName "DanteSyncTray" -Trigger $Trigger -Action $Action -Principal $Principal -Force | Out-Null
 
-    # Method 2: Registry Run entry (Fallback - per-user, more reliable in some scenarios)
+    # Method 2: Registry Run entry (HKLM only - covers all users)
     Write-Host "  - Adding registry startup entry..."
-    $RegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-    try {
-        # Set for current user
-        Set-ItemProperty -Path $RegPath -Name "DanteSyncTray" -Value "`"$TrayPath`"" -ErrorAction Stop
-        Write-Host "    Registry entry added for current user." -ForegroundColor Gray
-    } catch {
-        Write-Warning "Failed to add registry entry: $_"
-    }
-
-    # Also add to HKLM for all users (requires admin, which we have)
     $RegPathLM = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
     try {
         Set-ItemProperty -Path $RegPathLM -Name "DanteSyncTray" -Value "`"$TrayPath`"" -ErrorAction Stop
         Write-Host "    Registry entry added for all users." -ForegroundColor Gray
     } catch {
-        Write-Warning "Failed to add machine-wide registry entry: $_"
+        Write-Warning "Failed to add registry entry: $_"
     }
 
     # Start tray in user's interactive session (works over SSH/remote)
