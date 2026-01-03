@@ -16,7 +16,7 @@ serde_json = "1.0"
 
 [package]
 name = "dantesync"
-version = "1.8.3"
+version = "1.8.4"
 edition = "2021"
 description = "High-precision PTP synchronization for Dante Audio networks"
 license = "MIT"
