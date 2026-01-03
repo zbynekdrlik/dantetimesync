@@ -292,6 +292,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
