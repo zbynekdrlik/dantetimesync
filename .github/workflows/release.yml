@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v1.8.4)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -32,6 +38,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -103,6 +111,7 @@ jobs:
         if: runner.os == 'Linux'
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
             ${{ matrix.asset_name }}
             ${{ matrix.asset_name }}.sha256
@@ -112,6 +121,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
             ${{ matrix.asset_name }}
             ${{ matrix.asset_name }}.sha256

@@ -304,10 +304,12 @@ jobs:
           TAG="v$VERSION"
           echo "Version: $VERSION"
           echo "Tag: $TAG"
+          echo "TAG=$TAG" >> $GITHUB_ENV
 
           # Check if tag already exists (should not, version-check validates this)
           if git tag -l "$TAG" | grep -q .; then
             echo "Tag $TAG already exists, skipping release"
+            echo "SKIP_RELEASE=true" >> $GITHUB_ENV
             exit 0
           fi
 
@@ -315,7 +317,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Create and push tag (this triggers the release workflow)
+          # Create and push tag
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "$TAG"
           echo "✓ Created and pushed tag $TAG"
+
+      - name: Trigger release workflow
+        if: env.SKIP_RELEASE != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Triggering release workflow for $TAG"
+          gh workflow run release.yml -f tag="$TAG"
+          echo "✓ Release workflow triggered for $TAG"
