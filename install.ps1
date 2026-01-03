@@ -619,19 +619,14 @@ try {
     Write-Error "Failed to start service. Check Event Viewer for details. Error: $_"
 }
 
-# 8. Setup Tray App (Startup) - Dual approach for reliability
+# 8. Setup Tray App (Startup) - Registry Run entry only
 if (Test-Path $TrayPath) {
     Write-Host "Setting up Tray App to run at startup..."
 
-    # Method 1: Scheduled Task (Primary - works for all users at logon)
-    Write-Host "  - Registering scheduled task..."
+    # Remove any old scheduled task (we use registry now)
     Unregister-ScheduledTask -TaskName "DanteSyncTray" -Confirm:$false -ErrorAction SilentlyContinue
-    $Trigger = New-ScheduledTaskTrigger -AtLogon
-    $Action = New-ScheduledTaskAction -Execute $TrayPath
-    $Principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users" -RunLevel Limited
-    Register-ScheduledTask -TaskName "DanteSyncTray" -Trigger $Trigger -Action $Action -Principal $Principal -Force | Out-Null
 
-    # Method 2: Registry Run entry (HKLM only - covers all users)
+    # Registry Run entry (HKLM - covers all users)
     Write-Host "  - Adding registry startup entry..."
     $RegPathLM = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
     try {
