@@ -13,7 +13,7 @@ The following nodes must be updated and verified after every successful CI/CD ru
 | strih.lan | 10.77.9.202 | Windows | newlevel | newlevel | v1.8.2 |
 | stream.lan | 10.77.9.204 | Windows | newlevel | newlevel | v1.8.2 |
 | bridge.lan | 10.77.9.201 | Windows | newlevel | newlevel | v1.8.0 (offline) |
-| songs | 10.77.9.212 | Windows | newlevel | newlevel | v1.5.6 (offline) |
+| songs | 10.77.9.212 | Windows | newlevel | newlevel | v1.8.5 |
 | stagebox1.lan | 10.77.9.237 | Windows | newlevel | newlevel | v1.8.2 |
-| piano.lan | 10.77.9.236 | Windows | newlevel | newlevel | v1.8.0 |
+| piano.lan | 10.77.9.236 | Windows | alexnb | newlevel | v1.8.6 |
 
